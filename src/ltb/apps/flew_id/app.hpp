@@ -38,6 +38,13 @@ struct AppOptions
     bool check = false;
     /// \brief Write the last rendered frame to this PNG file before exiting after `max_steps`.
     std::filesystem::path screenshot = { };
+    /// \brief Record every rendered frame to this video file (requires ffmpeg).
+    std::filesystem::path video     = { };
+    uint32                video_fps = 60U;
+    /// \brief The number of simulation steps per update (and per video frame) when not zero.
+    uint32 steps_per_update = 0U;
+    /// \brief Don't draw the settings window.
+    bool hide_gui = false;
     /// \brief Set by the app if the check (or the simulation itself) failed.
     bool failed = false;
 };
@@ -89,6 +96,11 @@ private:
     /// \brief Receives a copy of the rendered image when a screenshot is requested.
     vlk::objs::VulkanBuffer capture_buffer_ = { gpu_ };
 
+    /// \brief The standard input of the ffmpeg process encoding the video (if recording).
+    std::FILE*   video_pipe_        = nullptr;
+    vk::Extent2D video_extent_      = { };
+    uint64       video_frame_count_ = 0UZ;
+
     std::optional< vk::Semaphore > compute_semaphore_ = std::nullopt;
 
     Scenario         scenario_          = Scenario::Airfoil;
@@ -129,6 +141,17 @@ private:
     auto check_particles( ) -> utils::Result< void >;
     auto finish( ) -> utils::Result< void >;
     auto write_screenshot( ) -> utils::Result< void >;
+    /// \brief Copies the most recently captured image (BGRA or RGBA, top row first).
+    auto read_capture( ) -> utils::Result< std::vector< uint8 > >;
+
+    /// \brief Runs the simulation forward by the current number of steps per update.
+    auto advance( exec::UpdateRequests requests ) -> exec::UpdateRequests;
+
+    [[nodiscard( "Const getter" )]]
+    auto is_recording( ) const -> bool;
+    auto start_recording( ) -> utils::Result< void >;
+    auto stop_recording( ) -> void;
+    auto write_video_frame( ) -> utils::Result< void >;
 
     auto render( ) -> utils::Result< void >;
     auto update_camera_uniforms( vlk::objs::FrameInfo const& frame ) -> utils::Result< void >;

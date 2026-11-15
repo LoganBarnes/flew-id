@@ -21,6 +21,12 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
           cxxopts::value< std::string >( ) )
         ( "hide-particles", "Only draw the background" )
         ( "s,steps", "Exit after this many simulation steps", cxxopts::value< ltb::uint64 >( ) )
+        ( "video", "Record every frame to this video file (requires ffmpeg)",
+          cxxopts::value< std::string >( ) )
+        ( "fps", "Frame rate of the recorded video", cxxopts::value< ltb::uint32 >( ) )
+        ( "steps-per-frame", "Simulation steps per update (and per recorded frame)",
+          cxxopts::value< ltb::uint32 >( ) )
+        ( "hide-gui", "Don't draw the settings window" )
         ( "o,screenshot", "Write the last frame to this PNG file (requires --steps)",
           cxxopts::value< std::string >( ) )
         ( "c,check", "Verify the particles after --steps (exit code is non-zero on failure)" )
@@ -69,6 +75,19 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         {
             app_options.max_steps = args[ "steps" ].as< ltb::uint64 >( );
         }
+        if ( args.count( "video" ) > 0UZ )
+        {
+            app_options.video = args[ "video" ].as< std::string >( );
+        }
+        if ( args.count( "fps" ) > 0UZ )
+        {
+            app_options.video_fps = args[ "fps" ].as< ltb::uint32 >( );
+        }
+        if ( args.count( "steps-per-frame" ) > 0UZ )
+        {
+            app_options.steps_per_update = args[ "steps-per-frame" ].as< ltb::uint32 >( );
+        }
+        app_options.hide_gui = ( args.count( "hide-gui" ) > 0UZ );
         if ( args.count( "screenshot" ) > 0UZ )
         {
             app_options.screenshot = args[ "screenshot" ].as< std::string >( );

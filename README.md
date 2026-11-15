@@ -33,9 +33,18 @@ from that local copy, so changes made in `ltb-vlk/` are picked up immediately.
 
 # The same verification with no window.
 ./build/src/ltb/apps/Release/flew-check --scenario Venturi --steps 10000 --particles 1000000
+
+# Record a video (requires ffmpeg): 400 simulation steps per frame, background only.
+./build/src/ltb/apps/Release/flew-id --scenario Cylinder --field Vorticity --hide-particles \
+    --hide-gui --steps 120000 --steps-per-frame 400 --video cylinder.mp4
 ```
 
 Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`. Use `--help` for all options.
+
+The background can be colored by `Speed`, `Pressure`, `Density`, `Vorticity`, or
+`Temperature` (`--field`, or the Display section of the settings window). These are
+running averages over many particles and steps: individual particles move randomly, and
+it is the averages that behave like a fluid.
 
 ## How it works
 

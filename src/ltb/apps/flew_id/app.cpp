@@ -15,6 +15,7 @@
 #include <spdlog/spdlog.h>
 
 // standard
+#include <cstdio>
 #include <cstring>
 #include <ranges>
 
@@ -76,6 +77,11 @@ auto FlewIdApp::initialize( ) -> utils::Result< exec::UpdateLoopStatus >
                    .and_then( &FlewIdApp::initialize_display_pipeline )
                    .and_then( &FlewIdApp::initialize_camera ) );
 
+    if ( !app_options( ).video.empty( ) )
+    {
+        LTB_CHECK( this->start_recording( ) );
+    }
+
     auto const& tunnel = particles_->tunnel( );
     camera_.set_center( tunnel.size * 0.5F );
     camera_.set_width( tunnel.size.x * 1.1F );
@@ -96,12 +102,19 @@ auto FlewIdApp::fixed_step_update( exec::UpdateLoopStatus const& status )
 {
     auto requests = status.requests;
 
-    if ( finishing_ || ( paused_ && !single_step_ ) )
+    // While recording, the simulation advances a fixed number of steps
+    // per rendered frame (see frame_update) instead of following the clock.
+    if ( finishing_ || this->is_recording( ) || ( paused_ && !single_step_ ) )
     {
         return requests;
     }
     single_step_ = false;
 
+    return this->advance( requests );
+}
+
+auto FlewIdApp::advance( exec::UpdateRequests requests ) -> exec::UpdateRequests
+{
     if ( auto result = this->compute( ); !result )
     {
         spdlog::error(
@@ -139,8 +152,18 @@ auto FlewIdApp::frame_update( exec::UpdateLoopStatus const& status ) -> exec::Up
         }
     }
 
+    auto requests = status.requests;
+
+    if ( this->is_recording( ) && !finishing_ && !paused_ )
+    {
+        requests = this->advance( requests );
+    }
+
     imgui_.new_frame( );
-    this->configure_gui( );
+    if ( !app_options( ).hide_gui )
+    {
+        this->configure_gui( );
+    }
 
     if ( auto result = this->render( ); !result )
     {
@@ -150,8 +173,6 @@ auto FlewIdApp::frame_update( exec::UpdateLoopStatus const& status ) -> exec::Up
             result.error( ).debug_error_message( )
         );
     }
-
-    auto requests = status.requests;
 
     if ( finishing_ )
     {
@@ -215,7 +236,7 @@ auto FlewIdApp::configure_gui( ) -> void
         {
             single_step_ = true;
         }
-        ImGui::SliderInt( "Steps per update", &substeps_, 1, 32 );
+        ImGui::SliderInt( "Steps per update", &substeps_, 1, 200 );
         ImGui::SliderFloat(
             "Time step",
             &step_params_.delta_time,
@@ -286,6 +307,8 @@ auto FlewIdApp::on_resize( glm::ivec2 const size ) -> utils::Result< void >
 
 auto FlewIdApp::clean_up( ) -> utils::Result< void >
 {
+    this->stop_recording( );
+
     VK_CHECK( gpu_.device( ).get( ).waitIdle( ) );
 
     return utils::success( );
@@ -363,6 +386,10 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
         }
     }
     show_particles_ = !options.hide_particles;
+    if ( options.steps_per_update > 0U )
+    {
+        substeps_ = static_cast< int32 >( options.steps_per_update );
+    }
 
     LTB_CHECK( this->start_scenario( ) );
 
@@ -374,7 +401,10 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
                 ->read_particles( compute_cmd_and_sync_.command_pool( ), graphics_and_compute_queue_ )
         );
         initial_stats_ = compute_stats( initial_particles, particles_->tunnel( ), particles_->radius( ) );
-        substeps_      = static_cast< int32 >( check_steps_per_update );
+        if ( 0U == options.steps_per_update )
+        {
+            substeps_ = static_cast< int32 >( check_steps_per_update );
+        }
     }
 
     return this;
@@ -685,6 +715,7 @@ auto FlewIdApp::finish( ) -> utils::Result< void >
     {
         LTB_CHECK( this->write_screenshot( ) );
     }
+    this->stop_recording( );
     if ( options.check )
     {
         LTB_CHECK( this->check_particles( ) );
@@ -692,7 +723,66 @@ auto FlewIdApp::finish( ) -> utils::Result< void >
     return utils::success( );
 }
 
-auto FlewIdApp::write_screenshot( ) -> utils::Result< void >
+auto FlewIdApp::is_recording( ) const -> bool
+{
+    return nullptr != video_pipe_;
+}
+
+auto FlewIdApp::start_recording( ) -> utils::Result< void >
+{
+    auto const& options = app_options( );
+    auto const  extent  = presentation_.swapchain( ).settings( ).extent;
+
+    auto const format = presentation_.swapchain( ).image_format( );
+    LTB_CHECK_VALID( vk::Format::eB8G8R8A8Unorm == format || vk::Format::eB8G8R8A8Srgb == format );
+
+    // ffmpeg encodes the raw frames written to its standard input.
+    auto const command = fmt::format(
+        "ffmpeg -loglevel error -y -f rawvideo -pix_fmt bgra -s {}x{} -r {} -i - "
+        "-vf \"pad=ceil(iw/2)*2:ceil(ih/2)*2\" -c:v libx264 -pix_fmt yuv420p -crf 18 \"{}\"",
+        extent.width,
+        extent.height,
+        options.video_fps,
+        options.video.string( )
+    );
+
+    video_pipe_ = ::popen( command.c_str( ), "w" );
+    LTB_CHECK_VALID( nullptr != video_pipe_ );
+    video_extent_ = extent;
+
+    spdlog::info( "Recording {} ({} steps per frame)", options.video.string( ), substeps_ );
+
+    return utils::success( );
+}
+
+auto FlewIdApp::stop_recording( ) -> void
+{
+    if ( this->is_recording( ) )
+    {
+        ::pclose( video_pipe_ );
+        video_pipe_ = nullptr;
+        spdlog::info( "Wrote {} ({} frames)", app_options( ).video.string( ), video_frame_count_ );
+    }
+}
+
+auto FlewIdApp::write_video_frame( ) -> utils::Result< void >
+{
+    auto const extent = presentation_.swapchain( ).settings( ).extent;
+    if ( extent != video_extent_ )
+    {
+        spdlog::warn( "The window was resized. Recording stopped." );
+        this->stop_recording( );
+        return utils::success( );
+    }
+
+    LTB_CHECK( auto const pixels, this->read_capture( ) );
+    LTB_CHECK_VALID( 1UZ == std::fwrite( pixels.data( ), pixels.size( ), 1UZ, video_pipe_ ) );
+    ++video_frame_count_;
+
+    return utils::success( );
+}
+
+auto FlewIdApp::read_capture( ) -> utils::Result< std::vector< uint8 > >
 {
     LTB_CHECK_VALID( capture_buffer_.is_initialized( ) );
 
@@ -704,6 +794,16 @@ auto FlewIdApp::write_screenshot( ) -> utils::Result< void >
     LTB_CHECK( auto const* const data, capture_buffer_.memory( ).map( ) );
     auto pixels = std::vector< uint8 >( data, data + ( pixel_count * 4UZ ) );
     capture_buffer_.memory( ).unmap( );
+
+    return pixels;
+}
+
+auto FlewIdApp::write_screenshot( ) -> utils::Result< void >
+{
+    auto const extent      = presentation_.swapchain( ).settings( ).extent;
+    auto const pixel_count = static_cast< size_t >( extent.width ) * extent.height;
+
+    LTB_CHECK( auto pixels, this->read_capture( ) );
 
     // The swapchain stores blue first.
     auto const format = presentation_.swapchain( ).image_format( );
@@ -771,6 +871,11 @@ auto FlewIdApp::render( ) -> utils::Result< void >
                        .present_frame( frame, presentation_.swapchain( ), present_queue_ ) );
 
         graphics_cmd_and_sync_.increment_frame( );
+
+        if ( this->is_recording( ) )
+        {
+            LTB_CHECK( this->write_video_frame( ) );
+        }
     }
 
     return utils::success( );
@@ -863,19 +968,23 @@ auto FlewIdApp::record_render_commands( vlk::objs::FrameInfo const& frame )
 auto FlewIdApp::record_capture_commands( vlk::objs::FrameInfo const& frame )
     -> utils::Result< void >
 {
-    if ( finishing_ && !app_options( ).screenshot.empty( ) )
+    if ( this->is_recording( ) || ( finishing_ && !app_options( ).screenshot.empty( ) ) )
     {
         // Copy the rendered image into a buffer the CPU can read.
         auto const extent = presentation_.swapchain( ).settings( ).extent;
         auto const size   = static_cast< vk::DeviceSize >( extent.width ) * extent.height * 4U;
 
-        capture_buffer_.reset( );
-        LTB_CHECK( capture_buffer_.initialize( {
-            .layout       = { .total_size = size },
-            .buffer_usage = vk::BufferUsageFlagBits::eTransferDst,
-            .memory_properties
-            = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-        } ) );
+        if ( !capture_buffer_.is_initialized( ) || capture_buffer_.layout( ).total_size != size )
+        {
+            VK_CHECK( gpu_.device( ).get( ).waitIdle( ) );
+            capture_buffer_.reset( );
+            LTB_CHECK( capture_buffer_.initialize( {
+                .layout       = { .total_size = size },
+                .buffer_usage = vk::BufferUsageFlagBits::eTransferDst,
+                .memory_properties = vk::MemoryPropertyFlagBits::eHostVisible
+                                   | vk::MemoryPropertyFlagBits::eHostCoherent,
+            } ) );
+        }
 
         LTB_CHECK_VALID( frame.image_index < presentation_.swapchain( ).images( ).size( ) );
         auto const image = presentation_.swapchain( ).images( )[ frame.image_index ];

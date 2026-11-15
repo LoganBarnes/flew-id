@@ -1,0 +1,20 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Prefix sum, down sweep. Adds the (already scanned) parent
+// value of each block to every element of the child level.
+
+#include "particle.glsl"
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= sim.scan_child_count)
+    {
+        return;
+    }
+
+    grid[sim.scan_child_offset + index] += grid[sim.scan_parent_offset + (index / SCAN_BLOCK_SIZE)];
+}

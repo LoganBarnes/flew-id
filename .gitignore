@@ -1,0 +1,17 @@
+# System/tool-specific ignores
+.directory
+.DS_Store
+*~
+
+# Build output
+/build/
+/cmake-build-*/
+
+# IDEs
+.idea
+.vscode
+
+# Recordings
+*.flew
+*.mp4
+imgui.ini

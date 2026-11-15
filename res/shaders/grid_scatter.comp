@@ -1,0 +1,28 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Copies every particle into its cell's range of the sorted buffer.
+//
+// Before this pass grid[cell] is the index of the first particle in the cell.
+// Each particle claims the next slot, so afterwards grid[cell] is one past the
+// last particle in the cell (which is also the start of the next cell).
+
+#include "particle.glsl"
+
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= sim.particle_count)
+    {
+        return;
+    }
+
+    Particle particle = particles_a[index];
+
+    uint cell = cell_index(cell_coords(particle.position));
+    uint slot = atomicAdd(grid[cell], 1U);
+
+    particles_b[slot] = particle;
+}

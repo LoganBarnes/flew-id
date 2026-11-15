@@ -1,0 +1,27 @@
+// ///////////////////////////////////////////////////////////////////////////////////////
+// A Logan Thomas Barnes project
+// ///////////////////////////////////////////////////////////////////////////////////////
+#pragma once
+
+#include <filesystem>
+
+namespace ltb::flew::config
+{
+
+inline auto project_root_dir_path( ) -> std::filesystem::path
+{
+    return "@CMAKE_CURRENT_LIST_DIR@";
+}
+
+inline auto res_dir_path( ) -> std::filesystem::path
+{
+    return project_root_dir_path( ) / "res";
+}
+
+/// \brief The directory containing the compiled SPIR-V shaders.
+inline auto shader_dir_path( ) -> std::filesystem::path
+{
+    return "@LTB_FLEW_SPIRV_DIR@";
+}
+
+} // namespace ltb::flew::config

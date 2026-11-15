@@ -1,0 +1,31 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Prefix sum, up sweep. Each invocation replaces one block of the child level with
+// its exclusive prefix sum and writes the block's total to the parent level.
+
+#include "particle.glsl"
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main()
+{
+    uint block = gl_GlobalInvocationID.x;
+    uint first = block * SCAN_BLOCK_SIZE;
+    if (first >= sim.scan_child_count)
+    {
+        return;
+    }
+
+    uint last = min(first + SCAN_BLOCK_SIZE, sim.scan_child_count);
+    uint sum  = 0U;
+
+    for (uint i = first; i < last; ++i)
+    {
+        uint value = grid[sim.scan_child_offset + i];
+        grid[sim.scan_child_offset + i] = sum;
+        sum += value;
+    }
+
+    grid[sim.scan_parent_offset + block] = sum;
+}

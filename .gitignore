@@ -15,6 +15,3 @@
 *.flew
 *.mp4
 imgui.ini
-
-# Created when an IDE passes an unexpanded $HOME in a CMake path option
-/$HOME/

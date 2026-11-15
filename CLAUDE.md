@@ -10,14 +10,14 @@ available), TBB, X11 dev libraries, and ffmpeg for `--video`. Other dependencies
 
 ```bash
 git submodule update --init
-cmake -S . -B build -G "Ninja Multi-Config" \
+cmake -S . -B cmake-build-default -G "Ninja Multi-Config" \
     -DLTB_FLEW_USE_STRICT_FLAGS=ON -DLTB_VLK_USE_STRICT_FLAGS=ON -DLTB_FLEW_BUILD_TESTS=ON \
     -DCPM_SOURCE_CACHE=$HOME/.cache/CPM
-cmake --build build --config Debug --target flew-id flew-check flew-tests
+cmake --build cmake-build-default --config Debug --target flew-id flew-check flew-tests
 ```
 
-- The owner's CLion profile builds in `cmake-build-default/` (Ninja Multi-Config). Reuse that
-  directory instead of creating `build/` when it exists and configures cleanly.
+- The owner's CLion profile builds in `cmake-build-default/` with these same options. Use
+  that directory (`-B cmake-build-default`) instead of creating a second one.
 - `CPM_SOURCE_CACHE` must be an absolute path when set in an IDE: CLion does not expand
   `$HOME`, and CMake then creates a literal `$HOME/` directory.
 - ltb-vlk is built from the local `ltb-vlk/` submodule automatically (`cmake/ThirdParty.cmake`
@@ -27,7 +27,7 @@ cmake --build build --config Debug --target flew-id flew-check flew-tests
   (`~/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/bin`).
 - If `VULKAN_SDK` is unset, source the SDK's `setup-env.sh` first.
 - Strict flags are warnings-as-errors; keep them on.
-- Shaders (`res/shaders/*.{comp,vert,frag}`) compile to `build/spirv/` as part of the build.
+- Shaders (`res/shaders/*.{comp,vert,frag}`) compile to `<build dir>/spirv/` as part of the build.
   `*.glsl` files are includes.
 
 ## Verify changes
@@ -37,14 +37,14 @@ stats, scenarios). The GPU simulation is verified by running it:
 
 ```bash
 # Unit tests (GoogleTest, needs -DLTB_FLEW_BUILD_TESTS=ON).
-ctest --test-dir build -C Debug
+ctest --test-dir cmake-build-default -C Debug
 
 # Headless health check (no window). Run for every scenario after simulation changes.
-./build/src/ltb/apps/Debug/flew-check --scenario Airfoil --steps 10000
+./cmake-build-default/src/ltb/apps/Debug/flew-check --scenario Airfoil --steps 10000
 
 # Look at the result: run fast (--check uses 50 steps per update), save the last frame,
 # then open the PNG.
-./build/src/ltb/apps/Debug/flew-id --scenario Airfoil --field Pressure --hide-particles \
+./cmake-build-default/src/ltb/apps/Debug/flew-id --scenario Airfoil --field Pressure --hide-particles \
     --steps 150000 --check --screenshot /tmp/out.png
 ```
 

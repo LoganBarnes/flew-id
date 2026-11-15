@@ -1,0 +1,94 @@
+# Flew Id
+
+A 2D GPU particle wind tunnel (C++23, Vulkan compute) for building intuition about the fluid
+dynamics of flight. Goals are in `VISION.md`; usage and the step pipeline are in `README.md`.
+
+## Build
+
+Needs a C++23 compiler, CMake 3.23+, Ninja, the Vulkan SDK (`VULKAN_SDK` set, `glslc`
+available), TBB, X11 dev libraries, and ffmpeg for `--video`. Other dependencies come from CPM.
+
+```bash
+git submodule update --init
+cmake -S . -B build -G "Ninja Multi-Config" \
+    -DLTB_FLEW_USE_STRICT_FLAGS=ON -DLTB_VLK_USE_STRICT_FLAGS=ON \
+    -DCPM_SOURCE_CACHE=$HOME/.cache/CPM
+cmake --build build --config Debug --target flew-id flew-check
+```
+
+- `cmake` may not be on `PATH`. CLion's bundled one works
+  (`~/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/bin`).
+- If `VULKAN_SDK` is unset, source the SDK's `setup-env.sh` first.
+- Strict flags are warnings-as-errors; keep them on.
+- Shaders (`res/shaders/*.{comp,vert,frag}`) compile to `build/spirv/` as part of the build.
+  `*.glsl` files are includes.
+
+## Verify changes
+
+There are no unit tests. Verify by running:
+
+```bash
+# Headless health check (no window). Run for every scenario after simulation changes.
+./build/src/ltb/apps/Debug/flew-check --scenario Airfoil --steps 10000
+
+# Look at the result: run fast (--check uses 50 steps per update), save the last frame,
+# then open the PNG.
+./build/src/ltb/apps/Debug/flew-id --scenario Airfoil --field Pressure --hide-particles \
+    --steps 150000 --check --screenshot /tmp/out.png
+```
+
+- Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`.
+  Fields: `None`, `Speed`, `Pressure`, `Density`, `Vorticity`, `Temperature`.
+- Without `--check` or `--steps-per-frame`, `flew-id` runs at interactive pace (4 steps per
+  update), so large `--steps` values take minutes. That is not a hang.
+- Flow takes roughly 70k steps to cross the tunnel at the defaults, so features such as wakes
+  need 100k+ steps to develop.
+- Debug builds enable Vulkan validation. Any `Validation Error` in the output is a failure.
+  The `libvulkan_gfxstream.so ... treated as a 1.0 ICD` debug line is harmless.
+
+## Layout
+
+- `src/ltb/flew/` library:
+  - `particle_system.*` owns the GPU buffers and records the compute chain for one step.
+  - `particle.*` initial fill and CPU-side stats/checks.
+  - `solid_scene.*` polygons/circles, signed distance field, NACA airfoil.
+  - `scenarios.*` scenario definitions.
+- `src/ltb/apps/flew_id/` interactive app (GUI, rendering, screenshot, video).
+- `src/ltb/apps/flew_check/` headless check.
+- `res/shaders/` compute passes and display shaders.
+- `ltb-vlk/` git submodule: the Vulkan/GLFW/ImGui library this is built on.
+
+## Things that are easy to get wrong
+
+- Structs shared with GLSL must match byte for byte: `StepConstants` (`particle_system.cpp`)
+  with the push constant block in `particle.glsl` (128 byte limit), and `DisplayUniforms`
+  (`app.cpp`) with `display.glsl`.
+- Every compute pipeline shares the same five storage buffer bindings (`particle.glsl`).
+  Adding a binding means updating `initialize_pipeline` in `particle_system.cpp`.
+- The default time step and contact stiffness are tied together (`default_step_params`).
+  Softer or larger steps let particles pass through each other.
+- The model is a gas of soft disks, so it is compressible and noisy. Only the averaged
+  fields behave like a fluid; keep the flow speed below the thermal speed.
+
+## ltb-vlk
+
+`ltb-vlk` is the owner's own library and is meant to be edited here: fix bugs and improve it
+directly in the submodule. CMake builds against the local `ltb-vlk/` checkout automatically.
+
+- Commit submodule changes on its `flew-id` branch and push that branch before pushing a
+  flew-id commit that moves the submodule pointer.
+- Don't push to ltb-vlk `main`; the owner merges. Their `cfd` repo also uses ltb-vlk, so call
+  out API-breaking changes.
+
+## Conventions
+
+Follow the existing style (`.clang-format`, `.clang-tidy`): trailing return types,
+`utils::Result` with `LTB_CHECK` / `LTB_CHECK_VALID` / `VK_CHECK`, `*Settings` aggregates with
+designated initializers, fixed-width aliases (`float32`, `uint32`), and the file header banner.
+
+## Known gaps
+
+- No scrubbable playback format yet (video only), no Coanda scenario, no 3D, no web port.
+- The closed `Box` scenario slowly gains energy (about 7% over 80k steps); there is no
+  thermostat outside of the inflow region.
+- Field cells partly covered by a solid read as low density/pressure (a thin false rim).

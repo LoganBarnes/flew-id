@@ -32,7 +32,20 @@ struct DisplayUniforms
     float32   max_speed       = 1.0F;
     glm::vec2 tunnel_size     = { };
     glm::ivec2 solid_size     = { };
+    glm::ivec2 field_size     = { };
+
+    int32   field_mode            = 0;
+    float32 field_range           = 0.25F;
+    float32 reference_density     = 1.0F;
+    float32 reference_temperature = 1.0F;
+    int32   particle_mode         = 0;
+    float32 particle_brightness   = 1.0F;
 };
+
+constexpr auto field_mode_names = std::array{
+    "None", "Speed", "Pressure", "Density", "Vorticity", "Temperature",
+};
+constexpr auto particle_mode_names = std::array{ "Speed", "Plain" };
 
 /// \brief The number of simulation steps per update when running a check as fast as possible.
 constexpr auto check_steps_per_update = 50U;
@@ -225,7 +238,35 @@ auto FlewIdApp::configure_gui( ) -> void
         ImGui::SliderFloat( "Wall restitution", &step_params_.wall_restitution, 0.0F, 1.0F );
 
         ImGui::SeparatorText( "Display" );
-        if ( ImGui::SliderFloat( "Max speed (color)", &max_display_speed_, 0.1F, 10.0F ) )
+        auto display_changed = false;
+
+        display_changed |= ImGui::Combo(
+            "Background",
+            &field_mode_,
+            field_mode_names.data( ),
+            static_cast< int32 >( field_mode_names.size( ) )
+        );
+        display_changed |= ImGui::SliderFloat( "Field range", &field_range_, 0.01F, 2.0F );
+        display_changed |= ImGui::SliderFloat( "Max speed", &max_display_speed_, 0.1F, 5.0F );
+        ImGui::SliderFloat(
+            "Field smoothing",
+            &step_params_.field_blend,
+            0.0005F,
+            1.0F,
+            "%.4f",
+            ImGuiSliderFlags_Logarithmic
+        );
+
+        display_changed |= ImGui::Checkbox( "Show particles", &show_particles_ );
+        display_changed |= ImGui::Combo(
+            "Particle color",
+            &particle_mode_,
+            particle_mode_names.data( ),
+            static_cast< int32 >( particle_mode_names.size( ) )
+        );
+        display_changed |= ImGui::SliderFloat( "Particle brightness", &particle_brightness_, 0.0F, 1.0F );
+
+        if ( display_changed )
         {
             camera_frames_updated_.clear( );
         }
@@ -314,6 +355,15 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
         particle_count_ = options.particle_count;
     }
 
+    for ( auto mode = 0UZ; mode < field_mode_names.size( ); ++mode )
+    {
+        if ( options.field == field_mode_names[ mode ] )
+        {
+            field_mode_ = static_cast< int32 >( mode );
+        }
+    }
+    show_particles_ = !options.hide_particles;
+
     LTB_CHECK( this->start_scenario( ) );
 
     if ( options.check )
@@ -372,23 +422,27 @@ auto FlewIdApp::update_solid_descriptors( ) -> utils::Result< void >
     LTB_CHECK_VALID( background_.is_initialized( ) );
     LTB_CHECK_VALID( 1UZ == background_.descriptor_sets( ).size( ) );
 
-    auto const& solids = particles_->solid_buffer( );
+    // Bindings 1 and 2 of the background pipeline.
+    auto const buffers = std::array{ &particles_->solid_buffer( ), &particles_->field_buffer( ) };
 
-    auto const buffer_info = vk::DescriptorBufferInfo{ }
-                                 .setBuffer( solids.buffer( ).get( ) )
-                                 .setOffset( 0U )
-                                 .setRange( solids.layout( ).total_size );
-
-    for ( auto const& descriptor_set : background_.descriptor_sets( ).front( ).get( ) )
+    for ( auto index = 0U; index < buffers.size( ); ++index )
     {
-        auto const descriptor_write = vk::WriteDescriptorSet{ }
-                                          .setDstSet( descriptor_set )
-                                          .setDstBinding( 1U )
-                                          .setDstArrayElement( 0U )
-                                          .setDescriptorType( vk::DescriptorType::eStorageBuffer )
-                                          .setBufferInfo( buffer_info );
+        auto const buffer_info = vk::DescriptorBufferInfo{ }
+                                     .setBuffer( buffers[ index ]->buffer( ).get( ) )
+                                     .setOffset( 0U )
+                                     .setRange( buffers[ index ]->layout( ).total_size );
 
-        gpu_.device( ).get( ).updateDescriptorSets( descriptor_write, { } );
+        for ( auto const& descriptor_set : background_.descriptor_sets( ).front( ).get( ) )
+        {
+            auto const descriptor_write = vk::WriteDescriptorSet{ }
+                                              .setDstSet( descriptor_set )
+                                              .setDstBinding( index + 1U )
+                                              .setDstArrayElement( 0U )
+                                              .setDescriptorType( vk::DescriptorType::eStorageBuffer )
+                                              .setBufferInfo( buffer_info );
+
+            gpu_.device( ).get( ).updateDescriptorSets( descriptor_write, { } );
+        }
     }
 
     return utils::success( );
@@ -445,7 +499,8 @@ auto FlewIdApp::initialize_display_pipeline( ) -> utils::Result< FlewIdApp* >
             .vertex_attributes  = std::move( vertex_attributes ),
             .primitive_topology = vk::PrimitiveTopology::ePointList,
             // Everything is drawn back to front in a single plane.
-            .depth_stencil = vk::PipelineDepthStencilStateCreateInfo{ },
+            .depth_stencil  = vk::PipelineDepthStencilStateCreateInfo{ },
+            .alpha_blending = true,
         },
     } ) );
 
@@ -469,6 +524,11 @@ auto FlewIdApp::initialize_display_pipeline( ) -> utils::Result< FlewIdApp* >
                 .setStageFlags( vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment ),
             vk::DescriptorSetLayoutBinding{ }
                 .setBinding( 1U )
+                .setDescriptorType( vk::DescriptorType::eStorageBuffer )
+                .setDescriptorCount( 1U )
+                .setStageFlags( vk::ShaderStageFlagBits::eFragment ),
+            vk::DescriptorSetLayoutBinding{ }
+                .setBinding( 2U )
                 .setDescriptorType( vk::DescriptorType::eStorageBuffer )
                 .setDescriptorCount( 1U )
                 .setStageFlags( vk::ShaderStageFlagBits::eFragment ),
@@ -731,6 +791,15 @@ auto FlewIdApp::update_camera_uniforms( vlk::objs::FrameInfo const& frame )
         .max_speed       = max_display_speed_,
         .tunnel_size     = particles_->tunnel( ).size,
         .solid_size      = particles_->settings( ).solid_field_size,
+        .field_size      = particles_->field_size( ),
+
+        .field_mode        = field_mode_,
+        .field_range       = field_range_,
+        .reference_density = particles_->settings( ).fill.packing_fraction,
+        // The mean squared thermal speed.
+        .reference_temperature = thermal_speed_ * thermal_speed_,
+        .particle_mode         = particle_mode_,
+        .particle_brightness   = particle_brightness_,
     };
 
     LTB_CHECK_VALID( frame.frame_index < camera_ubo_.layout( ).ranges.size( ) );
@@ -761,6 +830,13 @@ auto FlewIdApp::record_render_commands( vlk::objs::FrameInfo const& frame )
     LTB_CHECK( background_.bind_descriptor_sets( frame ) );
     frame.command_buffer.draw( 4U, 1U, 0U, 0U );
 
+    if ( !show_particles_ )
+    {
+        imgui_.render( frame.command_buffer );
+        frame.command_buffer.endRenderPass( );
+        return this->record_capture_commands( frame );
+    }
+
     // The particles.
     graphics_.bind( frame.command_buffer );
 
@@ -781,6 +857,12 @@ auto FlewIdApp::record_render_commands( vlk::objs::FrameInfo const& frame )
 
     frame.command_buffer.endRenderPass( );
 
+    return this->record_capture_commands( frame );
+}
+
+auto FlewIdApp::record_capture_commands( vlk::objs::FrameInfo const& frame )
+    -> utils::Result< void >
+{
     if ( finishing_ && !app_options( ).screenshot.empty( ) )
     {
         // Copy the rendered image into a buffer the CPU can read.

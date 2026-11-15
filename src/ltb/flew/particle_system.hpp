@@ -20,6 +20,9 @@ struct ParticleSystemSettings
     SolidScene           solids = { };
     /// \brief The resolution of the distance field used to collide with the solids.
     glm::ivec2 solid_field_size = { 1024, 512 };
+    /// \brief The flow fields are measured on a coarser grid than the one used for collisions.
+    ///        Each field cell covers this many collision cells in each direction.
+    uint32 field_cell_scale = 6U;
 };
 
 /// \brief Values that can change between simulation steps.
@@ -51,6 +54,10 @@ struct StepParams
     float32 wall_friction = 0.5F;
     /// \brief Fraction of normal speed kept when bouncing off a solid.
     float32 wall_restitution = 1.0F;
+
+    /// \brief How much of each step's measurement of the flow fields is blended into their
+    ///        running average [0, 1]. Smaller values are smoother but respond more slowly.
+    float32 field_blend = 0.002F;
 };
 
 /// \brief Step parameters that keep the simulation stable for particles of the given size.
@@ -100,6 +107,12 @@ public:
     [[nodiscard( "Const getter" )]]
     auto solid_buffer( ) const -> vlk::objs::VulkanBuffer const&;
 
+    /// \brief The buffer containing the time averaged flow fields. One `vec4` per field
+    ///        cell: packing fraction, mean velocity (x, y), and temperature.
+    [[nodiscard( "Const getter" )]]
+    auto field_buffer( ) const -> vlk::objs::VulkanBuffer const&;
+
+    [[nodiscard( "Const getter" )]] auto field_size( ) const -> glm::ivec2 const&;
     [[nodiscard( "Const getter" )]] auto particle_count( ) const -> uint32;
     [[nodiscard( "Const getter" )]] auto radius( ) const -> float32;
     [[nodiscard( "Const getter" )]] auto tunnel( ) const -> Tunnel const&;
@@ -130,6 +143,10 @@ private:
     /// \brief The distance field of the solids.
     vlk::objs::VulkanBuffer solids_ = { gpu_ };
 
+    /// \brief The time averaged flow fields.
+    vlk::objs::VulkanBuffer fields_     = { gpu_ };
+    glm::ivec2              field_size_ = { };
+
     uint32 step_index_ = 0U;
 
     vlk::objs::VulkanComputePipeline count_pipeline_     = { gpu_ };
@@ -137,10 +154,11 @@ private:
     vlk::objs::VulkanComputePipeline scan_down_pipeline_ = { gpu_ };
     vlk::objs::VulkanComputePipeline scatter_pipeline_   = { gpu_ };
     vlk::objs::VulkanComputePipeline collide_pipeline_   = { gpu_ };
+    vlk::objs::VulkanComputePipeline fields_pipeline_    = { gpu_ };
 
     bool initialized_ = false;
 
-    auto initialize_buffers( std::vector< Particle > const& particles, vlk::CommandPool& command_pool, vk::Queue const& queue )
+    auto initialize_buffers( std::vector< Particle > const& particles, DistanceField const& field, vlk::CommandPool& command_pool, vk::Queue const& queue )
         -> utils::Result< void >;
     auto initialize_pipeline( vlk::objs::VulkanComputePipeline& pipeline, std::string_view shader_name )
         -> utils::Result< void >;

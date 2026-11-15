@@ -1,0 +1,69 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// Measures the flow properties (density, velocity, temperature) of the particles in
+// each field cell and blends them into a running average. Individual particles move
+// randomly so the averages are what reveal the behavior of the fluid as a whole.
+//
+// Reads the sorted particles (B) so it must run after the scatter pass.
+
+#include "particle.glsl"
+
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+void main()
+{
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= uint(sim.field_size.x * sim.field_size.y))
+    {
+        return;
+    }
+
+    ivec2 field_coords = ivec2(int(index) % sim.field_size.x, int(index) / sim.field_size.x);
+
+    // The block of particle grid cells covered by this field cell.
+    ivec2 lower_cell = field_coords * int(sim.field_scale);
+    ivec2 upper_cell = min(lower_cell + int(sim.field_scale), sim.grid_size) - ivec2(1);
+
+    uint  count          = 0U;
+    vec2  velocity_sum   = vec2(0.0F);
+    float speed_sq_sum   = 0.0F;
+
+    for (int y = lower_cell.y; y <= upper_cell.y; ++y)
+    {
+        uint first_cell = cell_index(ivec2(lower_cell.x, y));
+        uint last_cell  = cell_index(ivec2(upper_cell.x, y));
+
+        uint first = (first_cell == 0U) ? 0U : grid[first_cell - 1U];
+        uint last  = grid[last_cell];
+
+        for (uint i = first; i < last; ++i)
+        {
+            vec2 velocity = particles_b[i].velocity;
+
+            velocity_sum += velocity;
+            speed_sq_sum += dot(velocity, velocity);
+        }
+        count += (last - first);
+    }
+
+    vec2  cell_size = sim.tunnel_size / vec2(sim.grid_size);
+    ivec2 cells     = upper_cell - lower_cell + ivec2(1);
+    float area      = float(cells.x * cells.y) * cell_size.x * cell_size.y;
+
+    vec4 measured = vec4(0.0F);
+    if (count > 0U)
+    {
+        vec2 mean_velocity = velocity_sum / float(count);
+
+        // The fraction of the area covered by particles.
+        measured.x  = float(count) * 3.14159265F * sim.radius * sim.radius / area;
+        measured.yz = mean_velocity;
+        // Random motion about the mean. The mean was measured from the same few particles
+        // so the spread about it is underestimated by (count - 1) / count.
+        float variance = max(0.0F, (speed_sq_sum / float(count)) - dot(mean_velocity, mean_velocity));
+        measured.w = (count > 1U) ? variance * float(count) / float(count - 1U) : 0.0F;
+    }
+
+    fields[index] = mix(fields[index], measured, sim.field_blend);
+}

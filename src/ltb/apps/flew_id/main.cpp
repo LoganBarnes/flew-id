@@ -17,6 +17,9 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "scenario", "Box, Cylinder, Airfoil, Plate, or Venturi", cxxopts::value< std::string >( ) )
         ( "angle", "Angle of attack in degrees (Airfoil, Plate)", cxxopts::value< ltb::float32 >( ) )
         ( "flow", "Flow speed", cxxopts::value< ltb::float32 >( ) )
+        ( "field", "Background: None, Speed, Pressure, Density, Vorticity, or Temperature",
+          cxxopts::value< std::string >( ) )
+        ( "hide-particles", "Only draw the background" )
         ( "s,steps", "Exit after this many simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "o,screenshot", "Write the last frame to this PNG file (requires --steps)",
           cxxopts::value< std::string >( ) )
@@ -57,6 +60,11 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         {
             app_options.scenario_settings.flow_speed = args[ "flow" ].as< ltb::float32 >( );
         }
+        if ( args.count( "field" ) > 0UZ )
+        {
+            app_options.field = args[ "field" ].as< std::string >( );
+        }
+        app_options.hide_particles = ( args.count( "hide-particles" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )
         {
             app_options.max_steps = args[ "steps" ].as< ltb::uint64 >( );

@@ -8,6 +8,8 @@
 
 // standard
 #include <algorithm>
+#include <execution>
+#include <ranges>
 #include <cmath>
 #include <limits>
 
@@ -79,20 +81,65 @@ auto build_distance_field( SolidScene const& scene, Tunnel const& tunnel, glm::i
     auto const width  = static_cast< size_t >( size.x );
     auto const height = static_cast< size_t >( size.y );
 
-    auto field = DistanceField{
-        .size   = size,
-        .texels = std::vector< glm::vec4 >( width * height, glm::vec4{ far_distance, 0.0F, 1.0F, 0.0F } ),
-    };
-
     auto const texel_size = tunnel.size / glm::vec2( size );
 
-    for ( auto y = 0UZ; y < height; ++y )
-    {
-        for ( auto x = 0UZ; x < width; ++x )
+    // Exact distances are only needed close to the solids (particles only react when they
+    // touch a surface). Everywhere else is given this distance, which is far cheaper than
+    // measuring the distance to every edge of every solid from every texel.
+    auto const band = 8.0F * glm::max( texel_size.x, texel_size.y );
+
+    auto field = DistanceField{
+        .size   = size,
+        .texels = std::vector< glm::vec4 >( width * height, glm::vec4{ band, 0.0F, 1.0F, 0.0F } ),
+    };
+
+    auto const rows = std::views::iota( 0UZ, height );
+
+    // Writes the distance to one shape into the texels within `band` of its bounding box.
+    auto const add_shape = [ & ]( glm::vec2 const& min_corner, glm::vec2 const& max_corner, auto const& distance_to ) {
+        auto const lower = glm::max( glm::ivec2( glm::floor( ( min_corner - band ) / texel_size ) ), glm::ivec2( 0 ) );
+        auto const upper = glm::min( glm::ivec2( glm::ceil( ( max_corner + band ) / texel_size ) ), size );
+        if ( lower.x >= upper.x || lower.y >= upper.y )
         {
-            auto const point = ( glm::vec2( glm::uvec2{ x, y } ) + 0.5F ) * texel_size;
-            field.texels[ ( y * width ) + x ].x = signed_distance( scene, point );
+            return;
         }
+
+        std::for_each( std::execution::par, rows.begin( ), rows.end( ), [ & ]( size_t const y ) {
+            if ( y < static_cast< size_t >( lower.y ) || y >= static_cast< size_t >( upper.y ) )
+            {
+                return;
+            }
+            for ( auto x = static_cast< size_t >( lower.x ); x < static_cast< size_t >( upper.x ); ++x )
+            {
+                auto const point = ( glm::vec2( glm::uvec2{ x, y } ) + 0.5F ) * texel_size;
+                auto&      texel = field.texels[ ( y * width ) + x ];
+                texel.x          = std::min( texel.x, std::min( distance_to( point ), band ) );
+            }
+        } );
+    };
+
+    for ( auto const& polygon : scene.polygons )
+    {
+        if ( polygon.size( ) < 3UZ )
+        {
+            continue;
+        }
+        auto min_corner = polygon.front( );
+        auto max_corner = polygon.front( );
+        for ( auto const& point : polygon )
+        {
+            min_corner = glm::min( min_corner, point );
+            max_corner = glm::max( max_corner, point );
+        }
+        add_shape( min_corner, max_corner, [ & ]( glm::vec2 const& point ) {
+            return polygon_signed_distance( polygon, point );
+        } );
+    }
+    for ( auto const& circle : scene.circles )
+    {
+        add_shape( circle.center - circle.radius, circle.center + circle.radius, [ & ]( glm::vec2 const& point ) {
+            return glm::distance( point, circle.center ) - circle.radius;
+        } );
     }
 
     // The direction away from the surface is the gradient of the distance.
@@ -122,6 +169,28 @@ auto build_distance_field( SolidScene const& scene, Tunnel const& tunnel, glm::i
     }
 
     return field;
+}
+
+auto sample_distance( DistanceField const& field, Tunnel const& tunnel, glm::vec2 const& point )
+    -> float32
+{
+    auto const coords = ( point / tunnel.size * glm::vec2( field.size ) ) - 0.5F;
+    auto const lower  = glm::ivec2( glm::floor( coords ) );
+    auto const t      = coords - glm::vec2( lower );
+
+    auto const max_coords = field.size - 1;
+    auto const c00        = glm::clamp( lower, glm::ivec2( 0 ), max_coords );
+    auto const c11        = glm::clamp( lower + 1, glm::ivec2( 0 ), max_coords );
+
+    auto const at = [ & ]( int32 const x, int32 const y ) {
+        return field.texels[ ( static_cast< size_t >( y ) * static_cast< size_t >( field.size.x ) ) + static_cast< size_t >( x ) ].x;
+    };
+
+    return glm::mix(
+        glm::mix( at( c00.x, c00.y ), at( c11.x, c00.y ), t.x ),
+        glm::mix( at( c00.x, c11.y ), at( c11.x, c11.y ), t.x ),
+        t.y
+    );
 }
 
 auto naca_airfoil( uint32 const digits, float32 const chord, uint32 const points_per_side )

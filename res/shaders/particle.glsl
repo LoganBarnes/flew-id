@@ -45,6 +45,13 @@ layout(push_constant, std430) uniform StepConstants
     float wall_friction;
     // Fraction of normal speed kept when bouncing off a solid.
     float wall_restitution;
+
+    // The flow fields are stored on a coarser grid. Each field cell
+    // covers `field_scale` x `field_scale` cells of the particle grid.
+    ivec2 field_size;
+    uint  field_scale;
+    // How much of each new field measurement is blended into the running average [0, 1].
+    float field_blend;
 } sim;
 
 // The number of cells summed by a single invocation of the prefix sum passes.
@@ -73,6 +80,13 @@ layout(std430, binding = 2) buffer Grid
 layout(std430, binding = 3) readonly buffer Solids
 {
     vec4 solids[];
+};
+
+// Time averaged flow properties of each field cell.
+// x: packing fraction, yz: mean velocity, w: temperature (mean squared thermal speed).
+layout(std430, binding = 4) buffer Fields
+{
+    vec4 fields[];
 };
 
 ivec2 cell_coords(vec2 position)

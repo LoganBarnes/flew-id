@@ -28,6 +28,10 @@ struct AppOptions
     /// \brief The scenario to start with and its settings.
     Scenario         scenario          = Scenario::Airfoil;
     ScenarioSettings scenario_settings = { };
+    /// \brief The background coloring to start with (None, Speed, Pressure, ...).
+    std::string field = "Speed";
+    /// \brief Start with the particles hidden.
+    bool hide_particles = false;
     /// \brief Exit after this many simulation steps when not zero.
     uint64 max_steps = 0UZ;
     /// \brief Read the particles back after `max_steps` and verify the simulation is healthy.
@@ -103,7 +107,12 @@ private:
     cam::Camera2d                camera_                = { };
     std::unordered_set< uint32 > camera_frames_updated_ = { };
 
-    float32 max_display_speed_ = 1.0F;
+    float32 max_display_speed_   = 1.0F;
+    int32   field_mode_          = 1;
+    float32 field_range_         = 0.5F;
+    bool    show_particles_      = true;
+    int32   particle_mode_       = 1;
+    float32 particle_brightness_ = 0.35F;
 
     bool initialized_ = false;
 
@@ -124,6 +133,8 @@ private:
     auto render( ) -> utils::Result< void >;
     auto update_camera_uniforms( vlk::objs::FrameInfo const& frame ) -> utils::Result< void >;
     auto record_render_commands( vlk::objs::FrameInfo const& frame ) -> utils::Result< void >;
+    /// \brief Ends the frame's commands, copying the rendered image first if it is needed.
+    auto record_capture_commands( vlk::objs::FrameInfo const& frame ) -> utils::Result< void >;
 };
 
 } // namespace ltb::flew

@@ -1,17 +1,9 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // A rectangle covering the tunnel (drawn as a four vertex triangle strip).
 
-// Matches `ltb::flew::DisplayUniforms`.
-layout(std140, binding = 0) uniform DisplayUbo
-{
-    mat4  clip_from_world;
-    vec2  viewport_size;
-    float diameter;
-    float max_speed;
-    vec2  tunnel_size;
-    ivec2 solid_size;
-} display;
+#include "display.glsl"
 
 layout(location = 0) out vec2 world_position;
 

@@ -36,12 +36,19 @@ struct DistanceField
     glm::ivec2 size = { };
     /// \brief Row major. x is the signed distance at the center of the
     ///        texel and yz is the direction away from the nearest surface.
+    ///        Distances are only exact near the solids. Far from them the
+    ///        distance is a positive value no larger than the true distance.
     std::vector< glm::vec4 > texels = { };
 };
 
 [[nodiscard( "Pure function" )]]
 auto build_distance_field( SolidScene const& scene, Tunnel const& tunnel, glm::ivec2 size )
     -> DistanceField;
+
+/// \brief The (bilinearly interpolated) signed distance stored in a distance field.
+[[nodiscard( "Pure function" )]]
+auto sample_distance( DistanceField const& field, Tunnel const& tunnel, glm::vec2 const& point )
+    -> float32;
 
 /// \brief The outline of a NACA 4-digit airfoil (e.g. 2412) with its leading edge at the
 ///        origin and its trailing edge at `(chord, 0)`.

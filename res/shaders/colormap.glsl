@@ -14,3 +14,15 @@ vec3 viridis(float t)
 
     return c0 + t * (c1 + t * (c2 + t * (c3 + t * (c4 + t * (c5 + t * c6)))));
 }
+
+// A two sided color scale for t in [-1, 1]: blue (negative), dark (zero), red (positive).
+vec3 diverging(float t)
+{
+    t = clamp(t, -1.0F, 1.0F);
+
+    const vec3 negative = vec3(0.25F, 0.55F, 1.00F);
+    const vec3 zero     = vec3(0.05F, 0.05F, 0.07F);
+    const vec3 positive = vec3(1.00F, 0.40F, 0.25F);
+
+    return (t < 0.0F) ? mix(zero, negative, -t) : mix(zero, positive, t);
+}

@@ -7,6 +7,7 @@
 #include "ltb/flew/ltb_flew_config.hpp"
 #include "ltb/vlk/buffer_utils.hpp"
 #include "ltb/vlk/check.hpp"
+#include "ltb/vlk/command_buffer.hpp"
 #include "ltb/vlk/device_memory_utils.hpp"
 
 // standard
@@ -47,6 +48,10 @@ struct StepConstants
 
     float32 wall_friction    = 0.0F;
     float32 wall_restitution = 1.0F;
+
+    glm::ivec2 field_size  = { };
+    uint32     field_scale = 1U;
+    float32    field_blend = 0.0F;
 };
 
 constexpr auto particles_a_range = 0UZ;
@@ -122,6 +127,10 @@ auto ParticleSystem::initialize(
     // can only touch particles in its own or adjacent cells.
     grid_size_ = glm::max( glm::ivec2( 1 ), glm::ivec2( settings_.tunnel.size / ( 2.0F * radius_ ) ) );
 
+    LTB_CHECK_VALID( settings_.field_cell_scale > 0U );
+    auto const field_scale = static_cast< int32 >( settings_.field_cell_scale );
+    field_size_            = ( grid_size_ + ( field_scale - 1 ) ) / field_scale;
+
     auto offset = 0U;
     auto count  = static_cast< uint32 >( grid_size_.x ) * static_cast< uint32 >( grid_size_.y );
     for ( auto& level : scan_levels_ )
@@ -133,12 +142,16 @@ auto ParticleSystem::initialize(
     // The last level is the single (unused) total of the level before it.
     LTB_CHECK_VALID( 1U == scan_levels_.back( ).count );
 
-    auto const solid_distance = [ this ]( glm::vec2 const& point ) {
-        return signed_distance( settings_.solids, point );
+    auto const field = build_distance_field( settings_.solids, settings_.tunnel, settings_.solid_field_size );
+
+    // Particles start outside of the solids.
+    auto const solid_distance = [ & ]( glm::vec2 const& point ) {
+        return sample_distance( field, settings_.tunnel, point );
     };
     LTB_CHECK(
         this->initialize_buffers(
             fill_tunnel( settings_.tunnel, settings_.fill, solid_distance ),
+            field,
             command_pool,
             queue
         )
@@ -149,6 +162,7 @@ auto ParticleSystem::initialize(
     LTB_CHECK( this->initialize_pipeline( scan_down_pipeline_, "grid_scan_down.comp.spv" ) );
     LTB_CHECK( this->initialize_pipeline( scatter_pipeline_, "grid_scatter.comp.spv" ) );
     LTB_CHECK( this->initialize_pipeline( collide_pipeline_, "collide_integrate.comp.spv" ) );
+    LTB_CHECK( this->initialize_pipeline( fields_pipeline_, "fields.comp.spv" ) );
 
     initialized_ = true;
 
@@ -162,6 +176,7 @@ auto ParticleSystem::is_initialized( ) const -> bool
 
 auto ParticleSystem::initialize_buffers(
     std::vector< Particle > const& particles,
+    DistanceField const&           field,
     vlk::CommandPool&              command_pool,
     vk::Queue const&               queue
 ) -> utils::Result< void >
@@ -190,9 +205,34 @@ auto ParticleSystem::initialize_buffers(
         .memory_properties = vk::MemoryPropertyFlagBits::eDeviceLocal,
     } ) );
 
+    // The flow fields start at zero.
+    {
+        auto const fields_size = static_cast< vk::DeviceSize >( field_size_.x )
+                               * static_cast< vk::DeviceSize >( field_size_.y ) * sizeof( glm::vec4 );
+
+        LTB_CHECK( fields_.initialize( {
+            .layout       = { .total_size = fields_size },
+            .buffer_usage = vk::BufferUsageFlagBits::eStorageBuffer
+                          | vk::BufferUsageFlagBits::eTransferSrc
+                          | vk::BufferUsageFlagBits::eTransferDst,
+            .memory_properties = vk::MemoryPropertyFlagBits::eDeviceLocal,
+        } ) );
+
+        auto clear_command_buffer = vlk::CommandBuffer{ gpu_.device( ), command_pool };
+        LTB_CHECK( clear_command_buffer.initialize( ) );
+
+        VK_CHECK( clear_command_buffer.get( ).begin(
+            vk::CommandBufferBeginInfo{ }.setFlags( vk::CommandBufferUsageFlagBits::eOneTimeSubmit )
+        ) );
+        clear_command_buffer.get( ).fillBuffer( fields_.buffer( ).get( ), 0U, fields_size, 0U );
+        VK_CHECK( clear_command_buffer.get( ).end( ) );
+
+        VK_CHECK( queue.submit( vk::SubmitInfo{ }.setCommandBuffers( clear_command_buffer.get( ) ) ) );
+        VK_CHECK( queue.waitIdle( ) );
+    }
+
     // Upload the distance field of the solids.
     {
-        auto const field = build_distance_field( settings_.solids, settings_.tunnel, settings_.solid_field_size );
         auto const field_size = field.texels.size( ) * sizeof( glm::vec4 );
 
         LTB_CHECK( solids_.initialize( {
@@ -258,7 +298,7 @@ auto ParticleSystem::initialize_pipeline(
     std::string_view const            shader_name
 ) -> utils::Result< void >
 {
-    constexpr auto binding_count = 4U;
+    constexpr auto binding_count = 5U;
 
     auto bindings = std::vector< vk::DescriptorSetLayoutBinding >{ };
     for ( auto binding = 0U; binding < binding_count; ++binding )
@@ -307,6 +347,10 @@ auto ParticleSystem::initialize_pipeline(
             .setBuffer( solids_.buffer( ).get( ) )
             .setOffset( 0U )
             .setRange( solids_.layout( ).total_size ),
+        vk::DescriptorBufferInfo{ }
+            .setBuffer( fields_.buffer( ).get( ) )
+            .setOffset( 0U )
+            .setRange( fields_.layout( ).total_size ),
     };
 
     auto const& descriptor_sets = pipeline.descriptor_sets( ).get( );
@@ -352,6 +396,10 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
 
         .wall_friction    = params.wall_friction,
         .wall_restitution = params.wall_restitution,
+
+        .field_size  = field_size_,
+        .field_scale = settings_.field_cell_scale,
+        .field_blend = params.field_blend,
     };
 
     // Binds a pipeline with the current constants and runs it over `item_count` items.
@@ -416,6 +464,13 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
     // 4. Sort the particles by cell.
     dispatch( scatter_pipeline_, particle_count, 256U );
 
+    // Measure the flow fields from the sorted particles.
+    dispatch(
+        fields_pipeline_,
+        static_cast< uint32 >( field_size_.x ) * static_cast< uint32 >( field_size_.y ),
+        64U
+    );
+
     // 5. Collide and integrate.
     dispatch( collide_pipeline_, particle_count, 256U );
 }
@@ -467,6 +522,16 @@ auto ParticleSystem::particle_buffer( ) const -> vk::Buffer const&
 auto ParticleSystem::solid_buffer( ) const -> vlk::objs::VulkanBuffer const&
 {
     return solids_;
+}
+
+auto ParticleSystem::field_buffer( ) const -> vlk::objs::VulkanBuffer const&
+{
+    return fields_;
+}
+
+auto ParticleSystem::field_size( ) const -> glm::ivec2 const&
+{
+    return field_size_;
 }
 
 auto ParticleSystem::particle_count( ) const -> uint32

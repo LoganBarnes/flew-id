@@ -52,6 +52,8 @@ struct StepConstants
     glm::ivec2 field_size  = { };
     uint32     field_scale = 1U;
     float32    field_blend = 0.0F;
+
+    uint32 respawn = 0U;
 };
 
 constexpr auto particles_a_range = 0UZ;
@@ -400,6 +402,8 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         .field_size  = field_size_,
         .field_scale = settings_.field_cell_scale,
         .field_blend = params.field_blend,
+
+        .respawn = params.respawn ? 1U : 0U,
     };
 
     // Binds a pipeline with the current constants and runs it over `item_count` items.

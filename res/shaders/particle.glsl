@@ -52,6 +52,11 @@ layout(push_constant, std430) uniform StepConstants
     uint  field_scale;
     // How much of each new field measurement is blended into the running average [0, 1].
     float field_blend;
+
+    // When not zero, a particle leaving either end of the tunnel is replaced by a new
+    // particle of the undisturbed incoming flow (as if the tunnel continued far beyond
+    // both ends) instead of keeping its velocity when it re-enters at the other end.
+    uint respawn;
 } sim;
 
 // The number of cells summed by a single invocation of the prefix sum passes.

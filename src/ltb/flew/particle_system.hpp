@@ -58,6 +58,13 @@ struct StepParams
     /// \brief How much of each step's measurement of the flow fields is blended into their
     ///        running average [0, 1]. Smaller values are smoother but respond more slowly.
     float32 field_blend = 0.002F;
+
+    /// \brief How particles leaving either end of a flowing tunnel are treated. When false a
+    ///        particle keeps its velocity as it re-enters at the other end (it is only
+    ///        gradually reset in the inflow region). When true it is replaced by a new
+    ///        particle of the undisturbed incoming flow, as if the tunnel continued far
+    ///        beyond both ends.
+    bool respawn = false;
 };
 
 /// \brief Step parameters that keep the simulation stable for particles of the given size.

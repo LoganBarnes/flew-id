@@ -29,6 +29,7 @@ struct CheckOptions
     Scenario               scenario          = Scenario::Box;
     ScenarioSettings       scenario_settings = { };
     uint64                 steps             = 5'000UZ;
+    bool                   respawn           = false;
 };
 
 /// \brief The number of steps recorded into a single command buffer.
@@ -59,6 +60,7 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
     );
     params.flow_speed    = setup.flow_speed;
     params.thermal_speed = options.system.fill.thermal_speed;
+    params.respawn       = options.respawn;
 
     LTB_CHECK( auto const initial_particles, particles.read_particles( command_pool, queue ) );
     auto const initial_stats
@@ -129,6 +131,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
     options.add_options( )
         ( "p,particles", "Number of particles", cxxopts::value< ltb::uint32 >( ) )
         ( "scenario", "Box, Cylinder, Airfoil, Plate, or Venturi", cxxopts::value< std::string >( ) )
+        ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "s,steps", "Number of simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "h,help", "Print usage" );
 
@@ -158,6 +161,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
             }
             check_options.scenario = scenario.value( );
         }
+        check_options.respawn = ( args.count( "respawn" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )
         {
             check_options.steps = args[ "steps" ].as< ltb::uint64 >( );

@@ -255,6 +255,11 @@ auto FlewIdApp::configure_gui( ) -> void
         );
         ImGui::SliderFloat( "Damping", &step_params_.damping, 0.0F, 500.0F );
         ImGui::SliderFloat( "Viscosity", &step_params_.viscosity, 0.0F, 500.0F );
+        ImGui::Checkbox( "Respawn at tunnel ends", &step_params_.respawn );
+        ImGui::SetItemTooltip(
+            "Replace particles leaving either end of the tunnel with new particles of\n"
+            "the incoming flow instead of carrying their velocity around to the other end."
+        );
         ImGui::SliderFloat( "Wall friction", &step_params_.wall_friction, 0.0F, 1.0F );
         ImGui::SliderFloat( "Wall restitution", &step_params_.wall_restitution, 0.0F, 1.0F );
 
@@ -385,7 +390,8 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
             field_mode_ = static_cast< int32 >( mode );
         }
     }
-    show_particles_ = !options.hide_particles;
+    show_particles_      = !options.hide_particles;
+    step_params_.respawn = options.respawn;
     if ( options.steps_per_update > 0U )
     {
         substeps_ = static_cast< int32 >( options.steps_per_update );

@@ -63,3 +63,6 @@ Each simulation step is a chain of compute passes (`res/shaders/`, driven by
 
 When there is flow, the left and right ends of the tunnel are connected and particles
 passing through a thin region on the left are reset to the incoming flow conditions.
+With `--respawn` (or "Respawn at tunnel ends" in the settings window) every particle that
+crosses an end of the tunnel is also replaced by a new particle of the undisturbed flow, as
+if the tunnel continued far beyond both ends.

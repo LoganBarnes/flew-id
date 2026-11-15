@@ -87,9 +87,9 @@ ctest --test-dir cmake-build-default -C Debug
 `ltb-vlk` is the owner's own library and is meant to be edited here: fix bugs and improve it
 directly in the submodule. CMake builds against the local `ltb-vlk/` checkout automatically.
 
-- Commit submodule changes on its `flew-id` branch and push that branch before pushing a
-  flew-id commit that moves the submodule pointer.
-- Don't push to ltb-vlk `main`; the owner merges. Their `cfd` repo also uses ltb-vlk, so call
+- Commit submodule changes on a branch (e.g. `flew-id`) and push that branch before pushing
+  a flew-id commit that moves the submodule pointer.
+- Don't push to ltb-vlk `main` without being asked; the owner decides when branches merge. Their `cfd` repo also uses ltb-vlk, so call
   out API-breaking changes.
 
 ## Conventions

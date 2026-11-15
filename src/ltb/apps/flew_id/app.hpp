@@ -32,6 +32,8 @@ struct AppOptions
     std::string field = "Speed";
     /// \brief Start with the particles hidden.
     bool hide_particles = false;
+    /// \brief Replace particles leaving the ends of the tunnel with new incoming particles.
+    bool respawn = false;
     /// \brief Exit after this many simulation steps when not zero.
     uint64 max_steps = 0UZ;
     /// \brief Read the particles back after `max_steps` and verify the simulation is healthy.

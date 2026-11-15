@@ -19,6 +19,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "flow", "Flow speed", cxxopts::value< ltb::float32 >( ) )
         ( "field", "Background: None, Speed, Pressure, Density, Vorticity, or Temperature",
           cxxopts::value< std::string >( ) )
+        ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "hide-particles", "Only draw the background" )
         ( "s,steps", "Exit after this many simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "video", "Record every frame to this video file (requires ffmpeg)",
@@ -70,6 +71,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         {
             app_options.field = args[ "field" ].as< std::string >( );
         }
+        app_options.respawn        = ( args.count( "respawn" ) > 0UZ );
         app_options.hide_particles = ( args.count( "hide-particles" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )
         {

@@ -11,10 +11,17 @@ available), TBB, X11 dev libraries, and ffmpeg for `--video`. Other dependencies
 ```bash
 git submodule update --init
 cmake -S . -B build -G "Ninja Multi-Config" \
-    -DLTB_FLEW_USE_STRICT_FLAGS=ON -DLTB_VLK_USE_STRICT_FLAGS=ON \
+    -DLTB_FLEW_USE_STRICT_FLAGS=ON -DLTB_VLK_USE_STRICT_FLAGS=ON -DLTB_FLEW_BUILD_TESTS=ON \
     -DCPM_SOURCE_CACHE=$HOME/.cache/CPM
-cmake --build build --config Debug --target flew-id flew-check
+cmake --build build --config Debug --target flew-id flew-check flew-tests
 ```
+
+- The owner's CLion profile builds in `cmake-build-default/` (Ninja Multi-Config). Reuse that
+  directory instead of creating `build/` when it exists and configures cleanly.
+- `CPM_SOURCE_CACHE` must be an absolute path when set in an IDE: CLion does not expand
+  `$HOME`, and CMake then creates a literal `$HOME/` directory.
+- ltb-vlk is built from the local `ltb-vlk/` submodule automatically (`cmake/ThirdParty.cmake`
+  sets `CPM_LtbVlk_SOURCE` when the checkout exists). No flag is needed.
 
 - `cmake` may not be on `PATH`. CLion's bundled one works
   (`~/.local/share/JetBrains/Toolbox/apps/clion/bin/cmake/linux/x64/bin`).
@@ -25,9 +32,13 @@ cmake --build build --config Debug --target flew-id flew-check
 
 ## Verify changes
 
-There are no unit tests. Verify by running:
+Unit tests cover the CPU-side code (`tests/`: solids and distance fields, particle fill and
+stats, scenarios). The GPU simulation is verified by running it:
 
 ```bash
+# Unit tests (GoogleTest, needs -DLTB_FLEW_BUILD_TESTS=ON).
+ctest --test-dir build -C Debug
+
 # Headless health check (no window). Run for every scenario after simulation changes.
 ./build/src/ltb/apps/Debug/flew-check --scenario Airfoil --steps 10000
 
@@ -56,6 +67,7 @@ There are no unit tests. Verify by running:
 - `src/ltb/apps/flew_id/` interactive app (GUI, rendering, screenshot, video).
 - `src/ltb/apps/flew_check/` headless check.
 - `res/shaders/` compute passes and display shaders.
+- `tests/` CPU unit tests, one file per library source file.
 - `ltb-vlk/` git submodule: the Vulkan/GLFW/ImGui library this is built on.
 
 ## Things that are easy to get wrong

@@ -18,6 +18,11 @@ option(
   "Use strict flags when building"
   OFF
 )
+option(
+  LTB_FLEW_BUILD_TESTS
+  "Build unit tests"
+  OFF
+)
 
 # ##############################################################################
 # CMake Package Manager
@@ -153,3 +158,10 @@ endif()
 # Applications
 # ##############################################################################
 add_subdirectory( ${CMAKE_CURRENT_LIST_DIR}/src/ltb/apps )
+
+# ##############################################################################
+# Tests
+# ##############################################################################
+if( LTB_FLEW_BUILD_TESTS )
+  add_subdirectory( ${CMAKE_CURRENT_LIST_DIR}/tests )
+endif()

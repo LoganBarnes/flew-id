@@ -19,6 +19,9 @@ cmake -S . -B build -G "Ninja Multi-Config" -DLTB_FLEW_USE_STRICT_FLAGS=ON
 cmake --build build --config Release
 ```
 
+Add `-DLTB_FLEW_BUILD_TESTS=ON` to build the unit tests (`flew-tests`), then run them with
+`ctest --test-dir build -C Release`.
+
 [ltb-vlk](https://github.com/LoganBarnes/ltb-vlk) is included as a git submodule and built
 from that local copy, so changes made in `ltb-vlk/` are picked up immediately.
 

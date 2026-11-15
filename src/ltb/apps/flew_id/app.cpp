@@ -82,9 +82,6 @@ auto FlewIdApp::initialize( ) -> utils::Result< exec::UpdateLoopStatus >
         LTB_CHECK( this->start_recording( ) );
     }
 
-    auto const& tunnel = particles_->tunnel( );
-    camera_.set_center( tunnel.size * 0.5F );
-    camera_.set_width( tunnel.size.x * 1.1F );
     camera_.resize( glm::vec2( glfw_window_.framebuffer_size( ) ) );
 
     initialized_ = true;
@@ -219,6 +216,7 @@ auto FlewIdApp::configure_gui( ) -> void
         }
         ImGui::SliderFloat( "Angle of attack", &scenario_settings_.angle_degrees, -10.0F, 45.0F );
         ImGui::SliderFloat( "Flow speed", &scenario_settings_.flow_speed, 0.05F, 2.0F );
+        ImGui::SliderFloat( "Venturi throat", &scenario_settings_.throat_fraction, 0.2F, 0.9F );
         auto particle_count = static_cast< int32 >( particle_count_ );
         if ( ImGui::InputInt( "Particles", &particle_count, 50'000, 500'000 ) )
         {
@@ -421,8 +419,15 @@ auto FlewIdApp::start_scenario( ) -> utils::Result< void >
     // Nothing on the GPU can be using the previous particles when they are destroyed.
     VK_CHECK( gpu_.device( ).get( ).waitIdle( ) );
 
-    auto settings = ParticleSystemSettings{ };
-    auto setup    = make_scenario( scenario_, settings.tunnel, scenario_settings_ );
+    auto settings   = ParticleSystemSettings{ };
+    settings.tunnel = scenario_tunnel( scenario_ );
+    // Keep the texels of the solids' distance field square.
+    settings.solid_field_size.x = static_cast< int32 >(
+        static_cast< float32 >( settings.solid_field_size.y ) * settings.tunnel.size.x
+        / settings.tunnel.size.y
+    );
+
+    auto setup = make_scenario( scenario_, settings.tunnel, scenario_settings_ );
 
     settings.solids              = std::move( setup.solids );
     settings.fill.particle_count = particle_count_;
@@ -446,6 +451,11 @@ auto FlewIdApp::start_scenario( ) -> utils::Result< void >
     step_params_.stiffness     = defaults.stiffness;
     step_params_.flow_speed    = setup.flow_speed;
     step_params_.thermal_speed = thermal_speed_;
+
+    // Fit the whole tunnel in the window.
+    auto const& tunnel = particles_->tunnel( );
+    camera_.set_center( tunnel.size * 0.5F );
+    camera_.set_width( tunnel.size.x * 1.1F );
 
     step_count_ = 0UZ;
     camera_frames_updated_.clear( );

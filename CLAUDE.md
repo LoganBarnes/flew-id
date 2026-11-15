@@ -48,7 +48,8 @@ ctest --test-dir cmake-build-default -C Debug
     --steps 150000 --check --screenshot /tmp/out.png
 ```
 
-- Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`.
+- Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`, `LongVenturi` (an 8x2 tunnel;
+  the others are 4x2, see `scenario_tunnel`).
   Fields: `None`, `Speed`, `Pressure`, `Density`, `Vorticity`, `Temperature`.
 - Without `--check` or `--steps-per-frame`, `flew-id` runs at interactive pace (4 steps per
   update), so large `--steps` values take minutes. That is not a hang.
@@ -79,6 +80,8 @@ ctest --test-dir cmake-build-default -C Debug
   Adding a binding means updating `initialize_pipeline` in `particle_system.cpp`.
 - The default time step and contact stiffness are tied together (`default_step_params`).
   Softer or larger steps let particles pass through each other.
+- The venturi scenarios choke at the default flow speed (0.5) and throat (1/3). Slower flow
+  and a wider throat (`--flow 0.2 --throat 0.5`) give subsonic, Bernoulli-like behavior.
 - The model is a gas of soft disks, so it is compressible and noisy. Only the averaged
   fields behave like a fluid; keep the flow speed below the thermal speed.
 

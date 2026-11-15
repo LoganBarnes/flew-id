@@ -42,7 +42,13 @@ from that local copy, so changes made in `ltb-vlk/` are picked up immediately.
     --hide-gui --steps 120000 --steps-per-frame 400 --video cylinder.mp4
 ```
 
-Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`. Use `--help` for all options.
+Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`, `LongVenturi`. Use `--help` for
+all options.
+
+The venturi scenarios choke at the default flow speed and throat (pressure builds up before
+the constriction and the flow leaves it as a jet). For the textbook picture of faster flow
+and lower pressure in the throat, use a slower flow and a wider throat, e.g.
+`--scenario LongVenturi --flow 0.2 --throat 0.5`.
 
 The background can be colored by `Speed`, `Pressure`, `Density`, `Vorticity`, or
 `Temperature` (`--field`, or the Display section of the settings window). These are

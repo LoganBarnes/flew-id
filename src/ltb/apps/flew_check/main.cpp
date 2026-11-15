@@ -37,6 +37,13 @@ constexpr auto steps_per_submit = 50UZ;
 
 auto run_check( CheckOptions options ) -> utils::Result< void >
 {
+    options.system.tunnel = scenario_tunnel( options.scenario );
+    // Keep the texels of the solids' distance field square.
+    options.system.solid_field_size.x = static_cast< int32 >(
+        static_cast< float32 >( options.system.solid_field_size.y ) * options.system.tunnel.size.x
+        / options.system.tunnel.size.y
+    );
+
     auto setup = make_scenario( options.scenario, options.system.tunnel, options.scenario_settings );
 
     options.system.solids             = std::move( setup.solids );
@@ -130,7 +137,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
     auto options = cxxopts::Options{ "flew-check", "Headless particle simulation check." };
     options.add_options( )
         ( "p,particles", "Number of particles", cxxopts::value< ltb::uint32 >( ) )
-        ( "scenario", "Box, Cylinder, Airfoil, Plate, or Venturi", cxxopts::value< std::string >( ) )
+        ( "scenario", "Box, Cylinder, Airfoil, Plate, Venturi, or LongVenturi", cxxopts::value< std::string >( ) )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "s,steps", "Number of simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "h,help", "Print usage" );

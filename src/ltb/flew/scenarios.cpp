@@ -21,6 +21,62 @@ auto scenario_from_name( std::string_view const name ) -> std::optional< Scenari
     return std::nullopt;
 }
 
+auto scenario_tunnel( Scenario const scenario ) -> Tunnel
+{
+    if ( Scenario::LongVenturi == scenario )
+    {
+        return Tunnel{ .size = { 8.0F, 2.0F } };
+    }
+    return Tunnel{ };
+}
+
+auto venturi_walls(
+    Tunnel const& tunnel,
+    float32 const start_x,
+    float32 const ramp_length,
+    float32 const throat_length,
+    float32 const throat_height
+) -> std::vector< Polygon >
+{
+    constexpr auto ramp_points = 32U;
+
+    auto const& size        = tunnel.size;
+    auto const  wall_height = 0.5F * ( size.y - throat_height );
+    auto const  end_x       = start_x + ( 2.0F * ramp_length ) + throat_length;
+
+    // The height of the bottom wall along the tunnel.
+    auto profile = Polygon{ };
+    for ( auto i = 0U; i <= ramp_points; ++i )
+    {
+        auto const t = static_cast< float32 >( i ) / static_cast< float32 >( ramp_points );
+        // Eases from zero to the full height with no corners.
+        auto const h = wall_height * 0.5F * ( 1.0F - std::cos( t * glm::pi< float32 >( ) ) );
+
+        profile.push_back( { start_x + ( t * ramp_length ), h } );
+    }
+    for ( auto i = ramp_points + 1U; i-- > 0U; )
+    {
+        auto const& up = profile[ i ];
+        // The widening ramp mirrors the narrowing one.
+        profile.push_back( { end_x - ( up.x - start_x ), up.y } );
+    }
+
+    auto bottom = profile;
+    auto top    = Polygon{ };
+    for ( auto const& point : profile )
+    {
+        top.push_back( { point.x, size.y - point.y } );
+    }
+
+    // Close the shapes outside of the tunnel.
+    bottom.push_back( { end_x, -size.y } );
+    bottom.push_back( { start_x, -size.y } );
+    top.push_back( { end_x, 2.0F * size.y } );
+    top.push_back( { start_x, 2.0F * size.y } );
+
+    return { std::move( bottom ), std::move( top ) };
+}
+
 auto make_scenario(
     Scenario const          scenario,
     Tunnel const&           tunnel,
@@ -78,34 +134,27 @@ auto make_scenario(
         break;
 
         case Venturi:
-        {
-            // Two smooth bumps narrowing the middle of the tunnel to a third of its height.
-            constexpr auto point_count = 64U;
-            auto const     start       = size.x * 0.3F;
-            auto const     length      = size.x * 0.4F;
-            auto const     bump_height = size.y / 3.0F;
+            // A short constriction with no straight section.
+            setup.solids.polygons = venturi_walls(
+                tunnel,
+                size.x * 0.3F,
+                size.x * 0.2F,
+                0.0F,
+                size.y * settings.throat_fraction
+            );
+            break;
 
-            auto bottom = Polygon{ };
-            auto top    = Polygon{ };
-            for ( auto i = 0U; i <= point_count; ++i )
-            {
-                auto const t = static_cast< float32 >( i ) / static_cast< float32 >( point_count );
-                auto const x = start + ( t * length );
-                auto const h = bump_height * 0.5F * ( 1.0F - std::cos( t * glm::two_pi< float32 >( ) ) );
-
-                bottom.push_back( { x, h } );
-                top.push_back( { x, size.y - h } );
-            }
-            // Close the shapes outside of the tunnel.
-            bottom.push_back( { start + length, -size.y } );
-            bottom.push_back( { start, -size.y } );
-            top.push_back( { start + length, 2.0F * size.y } );
-            top.push_back( { start, 2.0F * size.y } );
-
-            setup.solids.polygons.push_back( std::move( bottom ) );
-            setup.solids.polygons.push_back( std::move( top ) );
-        }
-        break;
+        case LongVenturi:
+            // Gentle slopes and a long narrow section, so the flow has room to settle
+            // at its new speed and pressure before the tunnel widens again.
+            setup.solids.polygons = venturi_walls(
+                tunnel,
+                size.x * 0.075F,
+                size.x * 0.3F,
+                size.x * 0.25F,
+                size.y * settings.throat_fraction
+            );
+            break;
     }
 
     return setup;

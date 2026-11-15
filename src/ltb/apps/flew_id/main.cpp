@@ -14,9 +14,11 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
     auto options = cxxopts::Options{ "flew-id", "A particle wind tunnel." };
     options.add_options( )
         ( "p,particles", "Number of particles", cxxopts::value< ltb::uint32 >( ) )
-        ( "scenario", "Box, Cylinder, Airfoil, Plate, or Venturi", cxxopts::value< std::string >( ) )
+        ( "scenario", "Box, Cylinder, Airfoil, Plate, Venturi, or LongVenturi", cxxopts::value< std::string >( ) )
         ( "angle", "Angle of attack in degrees (Airfoil, Plate)", cxxopts::value< ltb::float32 >( ) )
         ( "flow", "Flow speed", cxxopts::value< ltb::float32 >( ) )
+        ( "throat", "Open fraction of the tunnel height at the venturi's narrowest point",
+          cxxopts::value< ltb::float32 >( ) )
         ( "field", "Background: None, Speed, Pressure, Density, Vorticity, or Temperature",
           cxxopts::value< std::string >( ) )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
@@ -62,6 +64,10 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         if ( args.count( "angle" ) > 0UZ )
         {
             app_options.scenario_settings.angle_degrees = args[ "angle" ].as< ltb::float32 >( );
+        }
+        if ( args.count( "throat" ) > 0UZ )
+        {
+            app_options.scenario_settings.throat_fraction = args[ "throat" ].as< ltb::float32 >( );
         }
         if ( args.count( "flow" ) > 0UZ )
         {

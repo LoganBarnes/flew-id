@@ -39,8 +39,9 @@ stats, scenarios). The GPU simulation is verified by running it:
 # Unit tests (GoogleTest, needs -DLTB_FLEW_BUILD_TESTS=ON).
 ctest --test-dir cmake-build-default -C Debug
 
-# Headless health check (no window). Run for every scenario after simulation changes.
-./cmake-build-default/src/ltb/apps/Debug/flew-check --scenario Airfoil --steps 10000
+# Headless health check (no window). Run for every scenario and both models
+# (--model Gas, --model SPH) after simulation changes.
+./cmake-build-default/src/ltb/apps/Debug/flew-check --model SPH --scenario Airfoil --steps 10000
 
 # Look at the result: run fast (--check uses 50 steps per update), save the last frame,
 # then open the PNG.
@@ -61,7 +62,8 @@ ctest --test-dir cmake-build-default -C Debug
 ## Layout
 
 - `src/ltb/flew/` library:
-  - `particle_system.*` owns the GPU buffers and records the compute chain for one step.
+  - `particle_system.*` owns the GPU buffers and records the compute chain for one step,
+    for either fluid model (`FluidModel::Gas` or `FluidModel::Sph`).
   - `particle.*` initial fill and CPU-side stats/checks.
   - `solid_scene.*` polygons/circles, signed distance field, NACA airfoil.
   - `scenarios.*` scenario definitions.
@@ -76,7 +78,8 @@ ctest --test-dir cmake-build-default -C Debug
 - Structs shared with GLSL must match byte for byte: `StepConstants` (`particle_system.cpp`)
   with the push constant block in `particle.glsl` (128 byte limit), and `DisplayUniforms`
   (`app.cpp`) with `display.glsl`.
-- Every compute pipeline shares the same five storage buffer bindings (`particle.glsl`).
+- `StepConstants` is exactly 128 bytes. Adding a field means removing or packing another.
+- Every compute pipeline shares the same six storage buffer bindings (`particle.glsl`).
   Adding a binding means updating `initialize_pipeline` in `particle_system.cpp`.
 - The default time step and contact stiffness are tied together (`default_step_params`).
   Softer or larger steps let particles pass through each other.
@@ -86,8 +89,16 @@ ctest --test-dir cmake-build-default -C Debug
   tunnel. Moving particles sideways in the buffers to even out density was tried (a drift
   down the gradient of the time-averaged density) and removed: the averaged density lags, the
   correction overshoots, and the simulation blows up.
-- The model is a gas of soft disks, so it is compressible and noisy. Only the averaged
-  fields behave like a fluid; keep the flow speed below the thermal speed.
+- The gas model is compressible and noisy. Only the averaged fields behave like a fluid;
+  keep the flow speed below the thermal speed. Slowing the flow to make it less
+  compressible buries the pressure signal in noise (it scales with speed squared).
+- SPH: the particle mass is normalized so evenly spaced particles sum to a density of
+  exactly 1 (`ParticleSystem::initialize`). A 1% density error is a large pressure error
+  because the fluid is stiff, so pressure is displayed relative to the measured inflow
+  pressure (`undisturbed_pressure` in `field.frag`), not a nominal value.
+- SPH wall handling (`sph.glsl`): walls contribute density and a pressure force using
+  tabulated integrals of the kernel beyond a flat wall. The tables are specific to the
+  Wendland C2 kernel; changing the kernel means recomputing them.
 
 ## ltb-vlk
 
@@ -110,6 +121,8 @@ designated initializers, fixed-width aliases (`float32`, `uint32`), and the file
 - No scrubbable playback format yet (video only), no Coanda scenario, no 3D, no web port.
 - The closed `Box` scenario slowly gains energy (about 7% over 80k steps); there is no
   thermostat outside of the inflow region.
+- SPH has no particle shifting or density diffusion, so there is some acoustic noise in the
+  pressure field, and flow separates readily in the venturis' widening sections.
 - Density is not relaxed at the tunnel ends (only velocity), so uneven density wraps around.
   A real fix needs open ends that add and remove particles.
 - Field cells partly covered by a solid read as low density/pressure (a thin false rim).

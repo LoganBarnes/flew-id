@@ -10,7 +10,12 @@
 #include "ltb/vlk/command_buffer.hpp"
 #include "ltb/vlk/device_memory_utils.hpp"
 
+// external
+#include <glm/gtc/constants.hpp>
+
 // standard
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace ltb::flew
@@ -54,7 +59,16 @@ struct StepConstants
     float32    field_blend = 0.0F;
 
     uint32 boundary_flags = 0U;
+
+    uint32  model            = 0U;
+    float32 sound_speed      = 0.0F;
+    float32 smoothing_length = 0.0F;
+    float32 particle_mass    = 0.0F;
+    float32 rest_density     = 1.0F;
 };
+
+// Vulkan only guarantees 128 bytes of push constants.
+static_assert( sizeof( StepConstants ) <= 128UZ );
 
 /// \brief Matches RESPAWN_FLAG and BUFFERS_FLAG in `particle.glsl`.
 constexpr auto respawn_flag = 1U;
@@ -106,6 +120,44 @@ auto default_step_params( float32 const radius, float32 const typical_speed ) ->
     };
 }
 
+auto default_sph_step_params( float32 const smoothing_length, float32 const flow_speed )
+    -> StepParams
+{
+    // The flow speeds up as it squeezes around solids.
+    constexpr auto speed_up = 1.5F;
+    // Used when there is no flow (a closed box).
+    constexpr auto minimum_speed = 0.25F;
+    // The ratio of the speed of sound to the fastest flow speed.
+    constexpr auto sound_ratio = 10.0F;
+    // The fraction of the smoothing length a sound wave may cross in one step.
+    constexpr auto courant_number = 0.25F;
+
+    auto const max_speed   = std::max( flow_speed * speed_up, minimum_speed );
+    auto const sound_speed = sound_ratio * max_speed;
+
+    auto params = StepParams{
+        .delta_time = courant_number * smoothing_length / ( sound_speed + max_speed ),
+        .stiffness  = 0.0F,
+        // A kinematic viscosity giving thin boundary layers that are still a few
+        // particles thick at a few hundred thousand particles.
+        .viscosity  = 1.0e-3F,
+        .flow_speed = flow_speed,
+        // No random motion.
+        .thermal_speed = 0.0F,
+        // Fully no-slip solids, and no bouncing.
+        .wall_friction    = 1.0F,
+        .wall_restitution = 0.0F,
+        // The fields are not noisy so they need very little averaging.
+        .field_blend = 0.05F,
+        .sound_speed = sound_speed,
+    };
+    // The background pressure is a few times the dynamic pressure of the flow: enough
+    // to keep the pressure positive in the low pressure regions around solids.
+    params.rest_density = 1.0F - ( 4.0F * max_speed * max_speed / ( sound_speed * sound_speed ) );
+
+    return params;
+}
+
 ParticleSystem::ParticleSystem( vlk::objs::VulkanGpu& gpu )
     : gpu_( gpu )
 {
@@ -129,9 +181,57 @@ auto ParticleSystem::initialize(
     settings_ = std::move( settings );
     radius_   = particle_radius( settings_.tunnel, settings_.fill );
 
-    // Cells are at least one particle diameter wide so a particle
-    // can only touch particles in its own or adjacent cells.
-    grid_size_ = glm::max( glm::ivec2( 1 ), glm::ivec2( settings_.tunnel.size / ( 2.0F * radius_ ) ) );
+    auto const field = build_distance_field( settings_.solids, settings_.tunnel, settings_.solid_field_size );
+
+    // The area of the tunnel that is not inside a solid.
+    auto const free_texels = std::ranges::count_if( field.texels, []( glm::vec4 const& texel ) {
+        return texel.x > 0.0F;
+    } );
+    auto const free_area = settings_.tunnel.size.x * settings_.tunnel.size.y
+                         * static_cast< float32 >( free_texels )
+                         / static_cast< float32 >( field.texels.size( ) );
+    auto const area_per_particle = free_area / static_cast< float32 >( settings_.fill.particle_count );
+
+    spacing_ = std::sqrt( area_per_particle );
+
+    // SPH measures density by adding up a smooth kernel centered on each nearby particle.
+    // Choose the mass that makes evenly spaced particles add up to a density of exactly 1
+    // (the sum over a grid of particles is close to, but not exactly, 1 / spacing^2).
+    {
+        auto const h = 0.5F * settings_.sph_support_scale * spacing_;
+        auto const kernel = [ h ]( float32 const dist ) {
+            auto const q = dist / h;
+            if ( q >= 2.0F )
+            {
+                return 0.0F;
+            }
+            // Matches `kernel` in `sph.glsl`.
+            auto const t = 1.0F - ( 0.5F * q );
+            return ( 7.0F / ( 4.0F * glm::pi< float32 >( ) * h * h ) ) * ( t * t * t * t )
+                 * ( ( 2.0F * q ) + 1.0F );
+        };
+
+        auto const reach      = static_cast< int32 >( std::ceil( settings_.sph_support_scale ) );
+        auto       kernel_sum = 0.0F;
+        for ( auto y = -reach; y <= reach; ++y )
+        {
+            for ( auto x = -reach; x <= reach; ++x )
+            {
+                kernel_sum += kernel( spacing_ * glm::length( glm::vec2( glm::ivec2{ x, y } ) ) );
+            }
+        }
+        particle_mass_ = 1.0F / kernel_sum;
+    }
+
+    // Cells are at least as wide as the distance within which particles interact so
+    // a particle can only interact with particles in its own or adjacent cells.
+    auto interaction_distance = 2.0F * radius_;
+    if ( FluidModel::Sph == settings_.model )
+    {
+        LTB_CHECK_VALID( settings_.sph_support_scale >= 2.0F );
+        interaction_distance = std::max( interaction_distance, settings_.sph_support_scale * spacing_ );
+    }
+    grid_size_ = glm::max( glm::ivec2( 1 ), glm::ivec2( settings_.tunnel.size / interaction_distance ) );
 
     LTB_CHECK_VALID( settings_.field_cell_scale > 0U );
     auto const field_scale = static_cast< int32 >( settings_.field_cell_scale );
@@ -147,8 +247,6 @@ auto ParticleSystem::initialize(
     }
     // The last level is the single (unused) total of the level before it.
     LTB_CHECK_VALID( 1U == scan_levels_.back( ).count );
-
-    auto const field = build_distance_field( settings_.solids, settings_.tunnel, settings_.solid_field_size );
 
     // Particles start outside of the solids.
     auto const solid_distance = [ & ]( glm::vec2 const& point ) {
@@ -169,6 +267,8 @@ auto ParticleSystem::initialize(
     LTB_CHECK( this->initialize_pipeline( scatter_pipeline_, "grid_scatter.comp.spv" ) );
     LTB_CHECK( this->initialize_pipeline( collide_pipeline_, "collide_integrate.comp.spv" ) );
     LTB_CHECK( this->initialize_pipeline( fields_pipeline_, "fields.comp.spv" ) );
+    LTB_CHECK( this->initialize_pipeline( sph_density_pipeline_, "sph_density.comp.spv" ) );
+    LTB_CHECK( this->initialize_pipeline( sph_integrate_pipeline_, "sph_integrate.comp.spv" ) );
 
     initialized_ = true;
 
@@ -208,6 +308,12 @@ auto ParticleSystem::initialize_buffers(
         .layout       = { .total_size = grid_size },
         .buffer_usage = vk::BufferUsageFlagBits::eStorageBuffer
                       | vk::BufferUsageFlagBits::eTransferDst,
+        .memory_properties = vk::MemoryPropertyFlagBits::eDeviceLocal,
+    } ) );
+
+    LTB_CHECK( densities_.initialize( {
+        .layout       = { .total_size = particles.size( ) * sizeof( float32 ) },
+        .buffer_usage = vk::BufferUsageFlagBits::eStorageBuffer,
         .memory_properties = vk::MemoryPropertyFlagBits::eDeviceLocal,
     } ) );
 
@@ -304,7 +410,7 @@ auto ParticleSystem::initialize_pipeline(
     std::string_view const            shader_name
 ) -> utils::Result< void >
 {
-    constexpr auto binding_count = 5U;
+    constexpr auto binding_count = 6U;
 
     auto bindings = std::vector< vk::DescriptorSetLayoutBinding >{ };
     for ( auto binding = 0U; binding < binding_count; ++binding )
@@ -357,6 +463,10 @@ auto ParticleSystem::initialize_pipeline(
             .setBuffer( fields_.buffer( ).get( ) )
             .setOffset( 0U )
             .setRange( fields_.layout( ).total_size ),
+        vk::DescriptorBufferInfo{ }
+            .setBuffer( densities_.buffer( ).get( ) )
+            .setOffset( 0U )
+            .setRange( densities_.layout( ).total_size ),
     };
 
     auto const& descriptor_sets = pipeline.descriptor_sets( ).get( );
@@ -409,6 +519,12 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
 
         .boundary_flags = ( ( params.respawn || params.buffers ) ? respawn_flag : 0U )
                         | ( params.buffers ? buffers_flag : 0U ),
+
+        .model            = static_cast< uint32 >( settings_.model ),
+        .sound_speed      = params.sound_speed,
+        .smoothing_length = this->smoothing_length( ),
+        .particle_mass    = particle_mass_,
+        .rest_density     = params.rest_density,
     };
 
     // Binds a pipeline with the current constants and runs it over `item_count` items.
@@ -473,15 +589,27 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
     // 4. Sort the particles by cell.
     dispatch( scatter_pipeline_, particle_count, 256U );
 
-    // Measure the flow fields from the sorted particles.
-    dispatch(
-        fields_pipeline_,
-        static_cast< uint32 >( field_size_.x ) * static_cast< uint32 >( field_size_.y ),
-        64U
-    );
+    auto const field_count = static_cast< uint32 >( field_size_.x )
+                           * static_cast< uint32 >( field_size_.y );
 
-    // 5. Collide and integrate.
-    dispatch( collide_pipeline_, particle_count, 256U );
+    if ( FluidModel::Sph == settings_.model )
+    {
+        // 5. The density of the fluid at each particle, then the flow
+        //    fields (which include the pressure computed from the density).
+        dispatch( sph_density_pipeline_, particle_count, 256U );
+        dispatch( fields_pipeline_, field_count, 64U );
+
+        // 6. Pressure and viscous forces, then integrate.
+        dispatch( sph_integrate_pipeline_, particle_count, 256U );
+    }
+    else
+    {
+        // Measure the flow fields from the sorted particles.
+        dispatch( fields_pipeline_, field_count, 64U );
+
+        // 5. Collide and integrate.
+        dispatch( collide_pipeline_, particle_count, 256U );
+    }
 }
 
 auto ParticleSystem::read_particles( vlk::CommandPool& command_pool, vk::Queue const& queue )
@@ -551,6 +679,16 @@ auto ParticleSystem::particle_count( ) const -> uint32
 auto ParticleSystem::radius( ) const -> float32
 {
     return radius_;
+}
+
+auto ParticleSystem::spacing( ) const -> float32
+{
+    return spacing_;
+}
+
+auto ParticleSystem::smoothing_length( ) const -> float32
+{
+    return 0.5F * settings_.sph_support_scale * spacing_;
 }
 
 auto ParticleSystem::tunnel( ) const -> Tunnel const&

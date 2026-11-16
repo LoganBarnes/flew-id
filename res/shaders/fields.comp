@@ -5,9 +5,12 @@
 // each field cell and blends them into a running average. Individual particles move
 // randomly so the averages are what reveal the behavior of the fluid as a whole.
 //
-// Reads the sorted particles (B) so it must run after the scatter pass.
+// Reads the sorted particles (B) so it must run after the scatter pass (and, for
+// SPH, after the density pass: the fourth value is then the pressure of the fluid
+// instead of its temperature).
 
 #include "particle.glsl"
+#include "sph.glsl"
 
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -28,6 +31,9 @@ void main()
     uint  count          = 0U;
     vec2  velocity_sum   = vec2(0.0F);
     float speed_sq_sum   = 0.0F;
+    float pressure_sum   = 0.0F;
+
+    bool sph = (sim.model == MODEL_SPH);
 
     for (int y = lower_cell.y; y <= upper_cell.y; ++y)
     {
@@ -43,6 +49,11 @@ void main()
 
             velocity_sum += velocity;
             speed_sq_sum += dot(velocity, velocity);
+
+            if (sph)
+            {
+                pressure_sum += pressure_from_density(densities[i]);
+            }
         }
         count += (last - first);
     }
@@ -63,6 +74,11 @@ void main()
         // so the spread about it is underestimated by (count - 1) / count.
         float variance = max(0.0F, (speed_sq_sum / float(count)) - dot(mean_velocity, mean_velocity));
         measured.w = (count > 1U) ? variance * float(count) / float(count - 1U) : 0.0F;
+
+        if (sph)
+        {
+            measured.w = pressure_sum / float(count);
+        }
     }
 
     fields[index] = mix(fields[index], measured, sim.field_blend);

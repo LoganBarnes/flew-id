@@ -13,8 +13,24 @@
 namespace ltb::flew
 {
 
+/// \brief How the fluid is simulated.
+enum class FluidModel : uint32
+{
+    /// \brief A gas of colliding disks with random thermal motion. Pressure, viscosity, and
+    ///        the speed of sound emerge from the collisions. Flow properties are noisy and
+    ///        must be averaged over many particles.
+    Gas = 0U,
+    /// \brief Smoothed particle hydrodynamics. Each particle is a parcel of fluid with no
+    ///        random motion. Pressure is computed from the local density and the viscosity
+    ///        and speed of sound are settings.
+    Sph = 1U,
+};
+
+constexpr auto fluid_model_names = std::array< char const*, 2 >{ "Gas", "SPH" };
+
 struct ParticleSystemSettings
 {
+    FluidModel model = FluidModel::Gas;
     Tunnel               tunnel = { };
     ParticleFillSettings fill   = { };
     SolidScene           solids = { };
@@ -23,6 +39,9 @@ struct ParticleSystemSettings
     /// \brief The flow fields are measured on a coarser grid than the one used for collisions.
     ///        Each field cell covers this many collision cells in each direction.
     uint32 field_cell_scale = 6U;
+    /// \brief SPH: the distance within which particles interact, as a multiple of the
+    ///        average spacing between particles. The smoothing length is half of this.
+    float32 sph_support_scale = 3.0F;
 };
 
 /// \brief Values that can change between simulation steps.
@@ -75,6 +94,14 @@ struct StepParams
     bool buffers = true;
     /// \brief The length of the buffer zone at each end of the tunnel.
     float32 buffer_width = 0.3F;
+
+    /// \brief SPH: the speed of sound. The fluid behaves as incompressible
+    ///        when this is around ten times the fastest flow speed.
+    float32 sound_speed = 5.0F;
+    /// \brief SPH: the density (relative to the average density of 1) at which the pressure
+    ///        is zero. Slightly less than 1 so the fluid is always under a little pressure,
+    ///        which keeps the particles evenly spread.
+    float32 rest_density = 0.98F;
 };
 
 /// \brief Step parameters that keep the simulation stable for particles of the given size.
@@ -83,6 +110,12 @@ struct StepParams
 /// per step, and the stiffness is the largest the time step can integrate accurately.
 [[nodiscard( "Pure function" )]]
 auto default_step_params( float32 radius, float32 typical_speed ) -> StepParams;
+
+/// \brief Step parameters for SPH. The speed of sound is ten times the fastest expected flow
+///        speed (so the density varies by about 1%) and the time step is a fraction of the
+///        time a sound wave takes to cross the smoothing length.
+[[nodiscard( "Pure function" )]]
+auto default_sph_step_params( float32 smoothing_length, float32 flow_speed ) -> StepParams;
 
 /// \brief Owns the particle data on the GPU and the compute passes that update it.
 ///
@@ -132,6 +165,10 @@ public:
     [[nodiscard( "Const getter" )]] auto field_size( ) const -> glm::ivec2 const&;
     [[nodiscard( "Const getter" )]] auto particle_count( ) const -> uint32;
     [[nodiscard( "Const getter" )]] auto radius( ) const -> float32;
+    /// \brief The average distance between neighboring particles.
+    [[nodiscard( "Const getter" )]] auto spacing( ) const -> float32;
+    /// \brief SPH: the kernel's smoothing length.
+    [[nodiscard( "Const getter" )]] auto smoothing_length( ) const -> float32;
     [[nodiscard( "Const getter" )]] auto tunnel( ) const -> Tunnel const&;
     [[nodiscard( "Const getter" )]] auto grid_size( ) const -> glm::ivec2 const&;
     [[nodiscard( "Const getter" )]] auto settings( ) const -> ParticleSystemSettings const&;
@@ -148,6 +185,9 @@ private:
 
     ParticleSystemSettings settings_  = { };
     float32                radius_    = 0.0F;
+    float32                spacing_   = 0.0F;
+    /// \brief SPH: the mass of each particle (the average density of the fluid is 1).
+    float32 particle_mass_ = 0.0F;
     glm::ivec2             grid_size_ = { };
 
     /// \brief The cells, the block sums of the cells, the block
@@ -159,6 +199,8 @@ private:
     vlk::objs::VulkanBuffer grid_      = { gpu_ };
     /// \brief The distance field of the solids.
     vlk::objs::VulkanBuffer solids_ = { gpu_ };
+    /// \brief SPH: the density of the fluid at each (sorted) particle.
+    vlk::objs::VulkanBuffer densities_ = { gpu_ };
 
     /// \brief The time averaged flow fields.
     vlk::objs::VulkanBuffer fields_     = { gpu_ };
@@ -172,6 +214,8 @@ private:
     vlk::objs::VulkanComputePipeline scatter_pipeline_   = { gpu_ };
     vlk::objs::VulkanComputePipeline collide_pipeline_   = { gpu_ };
     vlk::objs::VulkanComputePipeline fields_pipeline_    = { gpu_ };
+    vlk::objs::VulkanComputePipeline sph_density_pipeline_   = { gpu_ };
+    vlk::objs::VulkanComputePipeline sph_integrate_pipeline_ = { gpu_ };
 
     bool initialized_ = false;
 

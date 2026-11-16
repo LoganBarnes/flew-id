@@ -133,6 +133,16 @@ TEST_F( FillTunnelTests, VelocitiesHaveTheRequestedMeanAndThermalSpeed )
     EXPECT_NEAR( rms, 0.5, 0.02 );
 }
 
+TEST_F( FillTunnelTests, ParticlesWithNoThermalSpeedAllMoveAtTheMeanVelocity )
+{
+    settings.thermal_speed = 0.0F;
+
+    for ( auto const& particle : fill_tunnel( tunnel, settings ) )
+    {
+        ASSERT_EQ( particle.velocity, settings.mean_velocity );
+    }
+}
+
 TEST_F( FillTunnelTests, IsDeterministicForASeed )
 {
     auto const first = fill_tunnel( tunnel, settings );
@@ -321,6 +331,20 @@ TEST_F( CheckStatsTests, EnergyMustBeConservedUnlessDriven )
     // Even a driven simulation shouldn't blow up or die out.
     current.kinetic_energy = 500.0;
     EXPECT_FALSE( check_stats( initial, current, true ).has_value( ) );
+    current.kinetic_energy = 5.0;
+    EXPECT_FALSE( check_stats( initial, current, true ).has_value( ) );
+}
+
+TEST_F( CheckStatsTests, ADrivenFluidMayStartAtRest )
+{
+    initial.kinetic_energy = 0.0;
+
+    // A little motion is fine (an allowance of 0.01 per particle).
+    auto current           = initial;
+    current.kinetic_energy = 0.5;
+    EXPECT_TRUE( check_stats( initial, current, true ).has_value( ) );
+    EXPECT_FALSE( check_stats( initial, current ).has_value( ) );
+
     current.kinetic_energy = 5.0;
     EXPECT_FALSE( check_stats( initial, current, true ).has_value( ) );
 }

@@ -75,7 +75,12 @@ auto fill_tunnel(
     auto rand_gen  = std::mt19937{ settings.seed };
     auto unit_dist = std::uniform_real_distribution( -1.0F, 1.0F );
     // Each velocity component is normally distributed (a 2D Maxwell-Boltzmann distribution).
-    auto velocity_dist = std::normal_distribution( 0.0F, settings.thermal_speed / glm::root_two< float32 >( ) );
+    // (A standard deviation of zero is not allowed so particles at rest are handled below.)
+    auto const has_thermal_motion = ( settings.thermal_speed > 0.0F );
+    auto       velocity_dist      = std::normal_distribution(
+        0.0F,
+        has_thermal_motion ? settings.thermal_speed / glm::root_two< float32 >( ) : 1.0F
+    );
 
     // Spread the particles evenly over the free cells.
     auto const cells_per_particle = static_cast< float64 >( free_cells.size( ) )
@@ -89,7 +94,9 @@ auto fill_tunnel(
         particles[ index ] = Particle{
             .position = free_cells[ cell_index ] + offset,
             .velocity = settings.mean_velocity
-                      + glm::vec2{ velocity_dist( rand_gen ), velocity_dist( rand_gen ) },
+                      + ( has_thermal_motion
+                              ? glm::vec2{ velocity_dist( rand_gen ), velocity_dist( rand_gen ) }
+                              : glm::vec2{ 0.0F } ),
         };
     }
 
@@ -221,8 +228,24 @@ auto check_stats( ParticleStats const& initial, ParticleStats const& current, bo
     LTB_CHECK_VALID( 0UZ == current.out_of_bounds_count );
     // Some kinetic energy is stored in the springs of overlapping
     // particles but the total should not grow or drain away.
-    LTB_CHECK_VALID( current.kinetic_energy <= initial.kinetic_energy * max_energy_ratio );
-    LTB_CHECK_VALID( current.kinetic_energy >= initial.kinetic_energy * min_energy_ratio );
+    if ( driven )
+    {
+        // A driven fluid may start at rest, so also allow a small amount of energy per particle.
+        auto const allowance = 0.01 * static_cast< float64 >( initial.count );
+        LTB_CHECK_VALID(
+            current.kinetic_energy <= ( initial.kinetic_energy * max_energy_ratio ) + allowance
+        );
+        // Nothing to lose if the fluid started (nearly) at rest.
+        if ( initial.kinetic_energy > allowance )
+        {
+            LTB_CHECK_VALID( current.kinetic_energy >= initial.kinetic_energy * min_energy_ratio );
+        }
+    }
+    else
+    {
+        LTB_CHECK_VALID( current.kinetic_energy <= initial.kinetic_energy * max_energy_ratio );
+        LTB_CHECK_VALID( current.kinetic_energy >= initial.kinetic_energy * min_energy_ratio );
+    }
     // Particles should never pass through each other.
     LTB_CHECK_VALID( current.max_overlap < 0.9F );
 

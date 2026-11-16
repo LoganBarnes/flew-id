@@ -28,6 +28,8 @@ struct CheckOptions
     ParticleSystemSettings system            = { };
     Scenario               scenario          = Scenario::Box;
     bool                   no_buffers        = false;
+    /// \brief The fraction of the tunnel covered by particles in SPH mode.
+    float32 sph_packing_fraction = 0.6F;
     uint64                 steps             = 5'000UZ;
     bool                   respawn           = false;
 };
@@ -50,6 +52,15 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
         default_scenario_settings( options.scenario )
     );
 
+    auto const sph = ( FluidModel::Sph == options.system.model );
+    if ( sph )
+    {
+        // Parcels of fluid fill the tunnel evenly and have no random motion.
+        options.system.fill.packing_fraction = options.sph_packing_fraction;
+        options.system.fill.thermal_speed    = 0.0F;
+        options.system.field_cell_scale      = 1U;
+    }
+
     options.system.solids             = std::move( setup.solids );
     options.system.fill.mean_velocity = { setup.flow_speed, 0.0F };
 
@@ -71,6 +82,10 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
     );
     params.flow_speed    = setup.flow_speed;
     params.thermal_speed = options.system.fill.thermal_speed;
+    if ( sph )
+    {
+        params = default_sph_step_params( particles.smoothing_length( ), setup.flow_speed );
+    }
     params.respawn       = options.respawn;
     params.buffers       = !options.no_buffers;
 
@@ -131,7 +146,8 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
     spdlog::info( "Particles inside solids: {}", inside_count );
     LTB_CHECK_VALID( 0UZ == inside_count );
 
-    return check_stats( initial_stats, final_stats, setup.flow_speed > 0.0F );
+    // The gas conserves energy unless it is flowing. SPH is viscous so it never does.
+    return check_stats( initial_stats, final_stats, sph || setup.flow_speed > 0.0F );
 }
 
 } // namespace
@@ -144,6 +160,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "p,particles", "Number of particles", cxxopts::value< ltb::uint32 >( ) )
         ( "scenario", "Box, Cylinder, Airfoil, Plate, Venturi, or LongVenturi", cxxopts::value< std::string >( ) )
         ( "no-buffers", "Reset particles in a thin inlet region instead of buffer zones at both ends" )
+        ( "model", "Gas or SPH", cxxopts::value< std::string >( ) )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "s,steps", "Number of simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "h,help", "Print usage" );
@@ -175,6 +192,17 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
             check_options.scenario = scenario.value( );
         }
         check_options.no_buffers = ( args.count( "no-buffers" ) > 0UZ );
+        if ( args.count( "model" ) > 0UZ )
+        {
+            auto const name = args[ "model" ].as< std::string >( );
+            if ( name != "Gas" && name != "SPH" )
+            {
+                spdlog::error( "Unknown model: {}", name );
+                return EXIT_FAILURE;
+            }
+            check_options.system.model
+                = ( name == "SPH" ) ? ltb::flew::FluidModel::Sph : ltb::flew::FluidModel::Gas;
+        }
         check_options.respawn    = ( args.count( "respawn" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )
         {

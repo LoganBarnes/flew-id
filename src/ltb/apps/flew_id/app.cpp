@@ -42,7 +42,12 @@ struct DisplayUniforms
     int32   particle_mode         = 0;
     float32 particle_brightness   = 1.0F;
     float32 buffer_width          = 0.0F;
+    float32 dynamic_pressure      = 0.0F;
 };
+
+/// \brief The fraction of the tunnel covered by SPH particles. They are spread evenly
+///        so this only determines how large the particles are drawn.
+constexpr auto sph_packing_fraction = 0.6F;
 
 constexpr auto field_mode_names = std::array{
     "None", "Speed", "Pressure", "Density", "Vorticity", "Temperature",
@@ -216,6 +221,21 @@ auto FlewIdApp::configure_gui( ) -> void
             scenario_settings_ = default_scenario_settings( scenario_ );
             restart_requested_ = true;
         }
+        auto model_index = static_cast< int32 >( model_ );
+        if ( ImGui::Combo(
+                 "Fluid model",
+                 &model_index,
+                 fluid_model_names.data( ),
+                 static_cast< int32 >( fluid_model_names.size( ) )
+             ) )
+        {
+            model_             = static_cast< FluidModel >( model_index );
+            restart_requested_ = true;
+        }
+        ImGui::SetItemTooltip(
+            "Gas: colliding disks with random motion (noisy, compressible).\n"
+            "SPH: smooth parcels of fluid with a chosen viscosity."
+        );
         ImGui::SliderFloat( "Angle of attack", &scenario_settings_.angle_degrees, -10.0F, 45.0F );
         ImGui::SliderFloat( "Flow speed", &scenario_settings_.flow_speed, 0.05F, 2.0F );
         ImGui::SliderFloat( "Venturi throat", &scenario_settings_.throat_fraction, 0.2F, 0.9F );
@@ -245,16 +265,39 @@ auto FlewIdApp::configure_gui( ) -> void
             "%.5f",
             ImGuiSliderFlags_Logarithmic
         );
-        ImGui::SliderFloat(
-            "Stiffness",
-            &step_params_.stiffness,
-            1.0e2F,
-            1.0e8F,
-            "%.0f",
-            ImGuiSliderFlags_Logarithmic
-        );
-        ImGui::SliderFloat( "Damping", &step_params_.damping, 0.0F, 500.0F );
-        ImGui::SliderFloat( "Viscosity", &step_params_.viscosity, 0.0F, 500.0F );
+        if ( FluidModel::Sph == model_ )
+        {
+            ImGui::SliderFloat(
+                "Viscosity",
+                &step_params_.viscosity,
+                1.0e-5F,
+                1.0e-1F,
+                "%.5f",
+                ImGuiSliderFlags_Logarithmic
+            );
+            ImGui::SetItemTooltip(
+                "Kinematic viscosity. The Reynolds number of the flow is\n"
+                "flow speed x obstacle size / viscosity."
+            );
+            ImGui::SliderFloat( "Sound speed", &step_params_.sound_speed, 0.5F, 50.0F );
+            ImGui::SetItemTooltip(
+                "How strongly the fluid resists compression. Around ten times the\n"
+                "flow speed behaves as incompressible. Higher values need a smaller time step."
+            );
+        }
+        else
+        {
+            ImGui::SliderFloat(
+                "Stiffness",
+                &step_params_.stiffness,
+                1.0e2F,
+                1.0e8F,
+                "%.0f",
+                ImGuiSliderFlags_Logarithmic
+            );
+            ImGui::SliderFloat( "Damping", &step_params_.damping, 0.0F, 500.0F );
+            ImGui::SliderFloat( "Viscosity", &step_params_.viscosity, 0.0F, 500.0F );
+        }
         if ( ImGui::Checkbox( "Buffer zones", &step_params_.buffers ) )
         {
             camera_frames_updated_.clear( );
@@ -390,6 +433,7 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
 
     auto const& options = app_options( );
 
+    model_             = options.model;
     scenario_          = options.scenario;
     scenario_settings_ = default_scenario_settings( scenario_ );
     if ( options.angle_degrees )
@@ -456,6 +500,18 @@ auto FlewIdApp::start_scenario( ) -> utils::Result< void >
         / settings.tunnel.size.y
     );
 
+    auto const sph = ( FluidModel::Sph == model_ );
+
+    settings.model = model_;
+    if ( sph )
+    {
+        // Parcels of fluid fill the tunnel evenly and have no random motion. The
+        // flow fields are not noisy so they don't need to be averaged over large cells.
+        settings.fill.packing_fraction = sph_packing_fraction;
+        settings.field_cell_scale      = 1U;
+    }
+    thermal_speed_ = sph ? 0.0F : ParticleFillSettings{ }.thermal_speed;
+
     if ( auto const scale = app_options( ).field_cell_scale; scale > 0U )
     {
         settings.field_cell_scale = scale;
@@ -478,13 +534,35 @@ auto FlewIdApp::start_scenario( ) -> utils::Result< void >
     );
     particles_ = std::move( particles );
 
-    // Keep any adjustments made to the interaction settings.
-    auto const defaults = default_step_params( particles_->radius( ), thermal_speed_ + setup.flow_speed );
+    if ( sph || params_model_ != model_ )
+    {
+        // Start from the model's defaults, keeping the settings shared by both models.
+        auto const previous = step_params_;
 
-    step_params_.delta_time    = defaults.delta_time;
-    step_params_.stiffness     = defaults.stiffness;
-    step_params_.flow_speed    = setup.flow_speed;
-    step_params_.thermal_speed = thermal_speed_;
+        step_params_ = sph ? default_sph_step_params( particles_->smoothing_length( ), setup.flow_speed )
+                           : StepParams{ };
+
+        step_params_.buffers      = previous.buffers;
+        step_params_.buffer_width = previous.buffer_width;
+        step_params_.respawn      = previous.respawn;
+        if ( sph && params_model_ == model_ )
+        {
+            // Keep any adjustments made to the fluid.
+            step_params_.viscosity     = previous.viscosity;
+            step_params_.wall_friction = previous.wall_friction;
+        }
+        params_model_ = model_;
+    }
+    if ( !sph )
+    {
+        // Keep any adjustments made to the interaction settings.
+        auto const defaults = default_step_params( particles_->radius( ), thermal_speed_ + setup.flow_speed );
+
+        step_params_.delta_time    = defaults.delta_time;
+        step_params_.stiffness     = defaults.stiffness;
+        step_params_.flow_speed    = setup.flow_speed;
+        step_params_.thermal_speed = thermal_speed_;
+    }
 
     // Fit the whole tunnel in the window.
     auto const& tunnel = particles_->tunnel( );
@@ -754,7 +832,12 @@ auto FlewIdApp::check_particles( ) -> utils::Result< void >
     spdlog::info( "Initial: {}", to_string( initial_stats_ ) );
     spdlog::info( "Final  : {}", to_string( stats ) );
 
-    return check_stats( initial_stats_, stats, step_params_.flow_speed > 0.0F );
+    // The gas conserves energy unless it is flowing. SPH is viscous so it never does.
+    return check_stats(
+        initial_stats_,
+        stats,
+        FluidModel::Sph == model_ || step_params_.flow_speed > 0.0F
+    );
 }
 
 auto FlewIdApp::finish( ) -> utils::Result< void >
@@ -959,12 +1042,21 @@ auto FlewIdApp::update_camera_uniforms( vlk::objs::FrameInfo const& frame )
         = ( step_params_.buffers && step_params_.flow_speed > 0.0F ) ? step_params_.buffer_width : 0.0F,
     };
 
+    auto display_ubo = camera_ubo;
+    if ( FluidModel::Sph == model_ )
+    {
+        // Show the pressure relative to the dynamic pressure of the incoming flow.
+        auto const speed = std::max( step_params_.flow_speed, 0.25F );
+
+        display_ubo.dynamic_pressure = 0.5F * speed * speed;
+    }
+
     LTB_CHECK_VALID( frame.frame_index < camera_ubo_.layout( ).ranges.size( ) );
     auto const& memory_range = camera_ubo_.layout( ).ranges[ frame.frame_index ];
 
     auto* const dst_data = camera_ubo_.mapped_data( ) + memory_range.offset;
-    LTB_CHECK_VALID( memory_range.size >= sizeof( camera_ubo ) );
-    LTB_CHECK_VALID( std::memcpy( dst_data, &camera_ubo, sizeof( camera_ubo ) ) == dst_data );
+    LTB_CHECK_VALID( memory_range.size >= sizeof( display_ubo ) );
+    LTB_CHECK_VALID( std::memcpy( dst_data, &display_ubo, sizeof( display_ubo ) ) == dst_data );
 
     camera_frames_updated_.emplace( frame.frame_index );
 

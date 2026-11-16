@@ -61,7 +61,24 @@ layout(push_constant, std430) uniform StepConstants
     // BUFFERS_FLAG: particles are reset in buffer zones at both ends of the tunnel
     // (more often the closer they are to the end) instead of only near the inlet.
     uint boundary_flags;
+
+    // Which fluid model is being simulated (MODEL_GAS or MODEL_SPH).
+    uint model;
+    // SPH: the speed of sound, which sets how strongly the fluid resists compression.
+    float sound_speed;
+    // SPH: the kernel's smoothing length. Particles interact within twice this distance.
+    float smoothing_length;
+    // SPH: the mass of each particle (the average density of the fluid is 1).
+    float particle_mass;
+    // SPH: the density at which the pressure is zero. Slightly less than
+    // the average density so the fluid is always under a little pressure.
+    float rest_density;
 } sim;
+
+// A gas of colliding disks with random thermal motion.
+const uint MODEL_GAS = 0U;
+// Smoothed particle hydrodynamics: each particle is a parcel of fluid.
+const uint MODEL_SPH = 1U;
 
 const uint RESPAWN_FLAG = 1U;
 const uint BUFFERS_FLAG = 2U;
@@ -99,6 +116,12 @@ layout(std430, binding = 3) readonly buffer Solids
 layout(std430, binding = 4) buffer Fields
 {
     vec4 fields[];
+};
+
+// SPH: the density of the fluid at each particle (in sorted order, matching particles_b).
+layout(std430, binding = 5) buffer Densities
+{
+    float densities[];
 };
 
 ivec2 cell_coords(vec2 position)

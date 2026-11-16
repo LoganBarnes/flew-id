@@ -26,7 +26,8 @@ struct AppOptions
     /// \brief Overrides the default number of particles when not zero.
     uint32 particle_count = 0U;
     /// \brief The scenario to start with and its settings.
-    Scenario scenario = Scenario::Airfoil;
+    FluidModel model    = FluidModel::Gas;
+    Scenario   scenario = Scenario::Airfoil;
     /// \brief Overrides of the scenario's default settings.
     std::optional< float32 > angle_degrees   = std::nullopt;
     std::optional< float32 > flow_speed      = std::nullopt;
@@ -114,6 +115,9 @@ private:
 
     std::optional< vk::Semaphore > compute_semaphore_ = std::nullopt;
 
+    FluidModel model_ = FluidModel::Gas;
+    /// \brief The model the current step parameters were created for.
+    FluidModel       params_model_      = FluidModel::Gas;
     Scenario         scenario_          = Scenario::Airfoil;
     ScenarioSettings scenario_settings_ = { };
     uint32           particle_count_    = ParticleFillSettings{ }.particle_count;

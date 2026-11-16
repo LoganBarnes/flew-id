@@ -6,6 +6,23 @@ See [VISION.md](VISION.md) for the goals of the project.
 Hundreds of thousands to millions of particles collide with each other and with solid
 objects (a wing, a cylinder, ...) entirely in Vulkan compute shaders.
 
+## Fluid models
+
+There are two ways of simulating the fluid (`--model`, or "Fluid model" in the settings
+window):
+
+- **Gas** (the default): the particles are disks with random thermal motion that bounce
+  off each other, like the molecules of a gas. Pressure, viscosity, and the speed of
+  sound all emerge from the collisions. Good for seeing where fluid behavior comes from,
+  but noisy: flow properties only appear when averaged over many particles, and the gas
+  is noticeably compressible at flow speeds fast enough to see clearly.
+- **SPH** (smoothed particle hydrodynamics): each particle is a parcel of fluid with no
+  random motion. Pressure is computed from how closely the parcels are packed, and the
+  viscosity and speed of sound are settings. The flow is smooth and nearly incompressible,
+  so this is the model for clean pictures of lift, wakes, and the venturi effect. In this
+  model "Pressure" shows the pressure coefficient: 1 (red) where the flow is brought to
+  rest, negative (blue) where it is faster than the incoming flow.
+
 ## Building
 
 Requirements: a C++23 compiler, CMake 3.23+, Ninja, the Vulkan SDK (with `glslc`), TBB, and
@@ -30,6 +47,9 @@ from that local copy, so changes made in `ltb-vlk/` are picked up immediately.
 ```bash
 # The interactive app.
 ./build/src/ltb/apps/Release/flew-id --scenario Airfoil --angle 8
+
+# The same scenario with smooth parcels of fluid, colored by pressure.
+./build/src/ltb/apps/Release/flew-id --model SPH --scenario Airfoil --field Pressure
 
 # Run a fixed number of steps, verify the particles, and save the last frame.
 ./build/src/ltb/apps/Release/flew-id --scenario Cylinder --steps 50000 --check --screenshot out.png
@@ -63,9 +83,13 @@ Each simulation step is a chain of compute passes (`res/shaders/`, driven by
 1. Count the particles in each cell of a uniform grid (cells are one particle diameter wide).
 2. Prefix sum the counts to find where each cell's particles start.
 3. Scatter the particles into a second buffer sorted by cell.
-4. For every particle, apply spring/damping forces from overlapping particles in the
-   neighboring cells (`interaction.glsl`), integrate, and collide with the tunnel walls and
-   the signed distance field of the solids (`solid.glsl`).
+4. Gas: for every particle, apply spring/damping forces from overlapping particles in the
+   neighboring cells (`interaction.glsl`) and integrate (`collide_integrate.comp`).
+   SPH: compute the density at every particle from its neighbors (`sph_density.comp`), then
+   apply pressure and viscous forces and integrate (`sph_integrate.comp`). Walls count as
+   fluid at rest, which keeps the pressure correct next to them and makes the fluid stick.
+5. Apply the tunnel ends, walls, and the signed distance field of the solids
+   (`boundary.glsl`, `solid.glsl`).
 
 When there is flow, the left and right ends of the tunnel are connected. Buffer zones at
 both ends (lightly tinted in the app) randomly reset particles to the undisturbed flow, more

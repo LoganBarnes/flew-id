@@ -20,6 +20,10 @@ layout(std140, binding = 0) uniform DisplayUbo
     float particle_brightness;
     // The length of the buffer zone at each end of the tunnel (zero if there are none).
     float buffer_width;
+    // SPH: the dynamic pressure of the incoming flow (0.5 * density * speed^2). When
+    // not zero the pressure is shown as a pressure coefficient instead of being
+    // estimated from the density and temperature of a gas.
+    float dynamic_pressure;
 } display;
 
 const int FIELD_NONE        = 0;

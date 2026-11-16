@@ -21,6 +21,8 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
           cxxopts::value< ltb::float32 >( ) )
         ( "field", "Background: None, Speed, Pressure, Density, Vorticity, or Temperature",
           cxxopts::value< std::string >( ) )
+        ( "model", "Gas (colliding disks) or SPH (smooth parcels of fluid)",
+          cxxopts::value< std::string >( ) )
         ( "no-buffers", "Reset particles in a thin inlet region instead of buffer zones at both ends" )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "field-scale", "Collision cells (per direction) averaged into one flow field cell",
@@ -79,6 +81,17 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         if ( args.count( "field" ) > 0UZ )
         {
             app_options.field = args[ "field" ].as< std::string >( );
+        }
+        if ( args.count( "model" ) > 0UZ )
+        {
+            auto const name = args[ "model" ].as< std::string >( );
+            if ( name != "Gas" && name != "SPH" )
+            {
+                spdlog::error( "Unknown model: {}", name );
+                return EXIT_FAILURE;
+            }
+            app_options.model
+                = ( name == "SPH" ) ? ltb::flew::FluidModel::Sph : ltb::flew::FluidModel::Gas;
         }
         app_options.no_buffers     = ( args.count( "no-buffers" ) > 0UZ );
         app_options.respawn        = ( args.count( "respawn" ) > 0UZ );

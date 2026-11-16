@@ -11,7 +11,7 @@ layout(std430, binding = 1) readonly buffer Solids
     vec4 solids[];
 };
 
-// x: packing fraction, yz: mean velocity, w: temperature.
+// x: packing fraction, yz: mean velocity, w: temperature (gas) or pressure (SPH).
 layout(std430, binding = 2) readonly buffer Fields
 {
     vec4 fields[];
@@ -50,6 +50,23 @@ float pressure(float density, float temperature)
     return density * temperature / (free_fraction * free_fraction);
 }
 
+// SPH: the pressure of the fluid entering the tunnel, averaged across its height
+// just after the inlet buffer (or a short way into the tunnel if there are no buffers).
+float undisturbed_pressure()
+{
+    const int SAMPLES = 16;
+
+    float x = (display.buffer_width > 0.0F) ? display.buffer_width : 0.05F * display.tunnel_size.x;
+
+    float sum = 0.0F;
+    for (int i = 0; i < SAMPLES; ++i)
+    {
+        float y = (float(i) + 0.5F) * display.tunnel_size.y / float(SAMPLES);
+        sum += sample_fields(vec2(x, y)).w;
+    }
+    return sum / float(SAMPLES);
+}
+
 vec3 field_color(vec2 position)
 {
     vec4 field = sample_fields(position);
@@ -61,6 +78,14 @@ vec3 field_color(vec2 position)
 
         case FIELD_PRESSURE:
         {
+            if (display.dynamic_pressure > 0.0F)
+            {
+                // SPH: the pressure coefficient, (pressure - undisturbed pressure) / dynamic
+                // pressure. It is 1 where the flow is brought to rest and negative where
+                // the flow is faster than the incoming flow.
+                float coefficient = (field.w - undisturbed_pressure()) / display.dynamic_pressure;
+                return diverging(coefficient / (2.0F * display.field_range));
+            }
             float reference = pressure(display.reference_density, display.reference_temperature);
             return diverging(((pressure(field.x, field.w) / reference) - 1.0F) / display.field_range);
         }
@@ -84,6 +109,11 @@ vec3 field_color(vec2 position)
         }
 
         case FIELD_TEMPERATURE:
+            if (display.dynamic_pressure > 0.0F)
+            {
+                // SPH parcels of fluid have no temperature.
+                break;
+            }
             return diverging(((field.w / display.reference_temperature) - 1.0F) / display.field_range);
     }
 

@@ -456,6 +456,11 @@ auto FlewIdApp::start_scenario( ) -> utils::Result< void >
         / settings.tunnel.size.y
     );
 
+    if ( auto const scale = app_options( ).field_cell_scale; scale > 0U )
+    {
+        settings.field_cell_scale = scale;
+    }
+
     auto setup = make_scenario( scenario_, settings.tunnel, scenario_settings_ );
 
     settings.solids              = std::move( setup.solids );

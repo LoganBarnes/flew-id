@@ -40,6 +40,9 @@ struct AppOptions
     bool hide_particles = false;
     /// \brief Replace particles leaving the ends of the tunnel with new incoming particles.
     bool respawn = false;
+    /// \brief The number of collision cells (in each direction) averaged into one cell of the
+    ///        flow fields when not zero. Larger cells are less noisy but less detailed.
+    uint32 field_cell_scale = 0U;
     /// \brief Exit after this many simulation steps when not zero.
     uint64 max_steps = 0UZ;
     /// \brief Read the particles back after `max_steps` and verify the simulation is healthy.

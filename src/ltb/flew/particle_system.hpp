@@ -110,6 +110,10 @@ struct StepParams
     ///        is zero. Slightly less than 1 so the fluid is always under a little pressure,
     ///        which keeps the particles evenly spread.
     float32 rest_density = 0.98F;
+    /// \brief SPH: nudge particles towards an even spacing every step (particle shifting).
+    ///        Clumps and gaps in the particles are what make the pressure noisy and let the
+    ///        flow separate too easily.
+    bool shifting = false;
 };
 
 /// \brief Step parameters that keep the simulation stable for particles of the given size.

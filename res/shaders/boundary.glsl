@@ -24,7 +24,7 @@ void apply_boundaries(uint index, inout vec2 position, inout vec2 velocity)
         // it re-enters the tunnel, and keeps the temperature of the fluid constant.
         float reset_rate = 0.0F;
 
-        if ((sim.boundary_flags & BUFFERS_FLAG) != 0U)
+        if ((sim.flags & BUFFERS_FLAG) != 0U)
         {
             // Buffer zones at both ends. The outlet buffer absorbs wakes and pressure
             // waves before they reach the end of the tunnel and the inlet buffer
@@ -44,7 +44,7 @@ void apply_boundaries(uint index, inout vec2 position, inout vec2 velocity)
         }
 
         vec2 flow_velocity = vec2(sim.flow_speed, 0.0F);
-        bool respawn       = left_tunnel && ((sim.boundary_flags & RESPAWN_FLAG) != 0U);
+        bool respawn       = left_tunnel && ((sim.flags & RESPAWN_FLAG) != 0U);
 
         if (sph)
         {

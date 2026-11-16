@@ -13,6 +13,19 @@
 
 layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
 
+// Particle shifting (Lind et al. 2012, with the step size of Skillen et al. 2013): each
+// step particles move a little way down the gradient of their concentration (how much of
+// the space around them the particles fill), away from clumps and into gaps. Without it
+// the particles slowly fall into uneven patterns with many more overlapping pairs.
+//
+// How far particles are shifted relative to how far they move each step.
+const float SHIFTING_STRENGTH = 2.0F;
+// An extra push apart for particles closer than the average spacing, which stops
+// particles from pairing up (the tensile instability).
+const float SHIFTING_TENSILE  = 0.2F;
+// The largest shift in one step, as a fraction of the smoothing length.
+const float SHIFTING_LIMIT    = 0.1F;
+
 // The acceleration of a particle caused by a wall `wall_distance` away in the direction
 // opposite to `normal`. The wall pushes back with the particle's own pressure.
 vec2 wall_acceleration(float wall_distance, vec2 normal, float density, float pressure)
@@ -45,6 +58,15 @@ void main()
     float pressure_term   = pressure / (density * density);
     float viscous_rate    = 8.0F * sim.viscosity;
     float viscous_epsilon = 0.01F * h * h;
+    float inv_h           = 1.0F / h;
+
+    bool shifting = (sim.flags & SHIFTING_FLAG) != 0U;
+    // The particles are spaced about sqrt(mass) apart (the average density is 1).
+    float inv_spacing_kernel = 1.0F / kernel_shape(sim.particle_mass);
+
+    // Shifting: the gradient of the concentration, without the constant factors of the
+    // kernel's gradient (like pair_sum).
+    vec2 concentration_sum = vec2(0.0F);
 
     // The pair forces are all along the kernel's gradient, gradient_scale() * t^3 * offset,
     // so they are summed without the constant factors (applied after the loop).
@@ -70,7 +92,18 @@ void main()
             strength += viscous_rate * inv_density                                           \
                       * (dot(relative_velocity, offset) / (dist_sq + viscous_epsilon));      \
                                                                                              \
-            pair_sum += (strength * gradient_shape(dist_sq)) * offset;                       \
+            float r  = sqrt(dist_sq);                                                        \
+            float t  = 1.0F - (0.5F * r * inv_h);                                            \
+            float t3 = t * t * t;                                                            \
+            pair_sum += (strength * t3) * offset;                                            \
+                                                                                             \
+            if (shifting)                                                                    \
+            {                                                                                \
+                float closeness = t3 * t * ((2.0F * r * inv_h) + 1.0F) * inv_spacing_kernel; \
+                closeness *= closeness;                                                      \
+                concentration_sum += ((1.0F + (SHIFTING_TENSILE * closeness * closeness))    \
+                                      * inv_density * t3) * offset;                          \
+            }                                                                                \
         }                                                                                    \
     }
 
@@ -99,10 +132,11 @@ void main()
     // were fluid that is not moving). This is what creates boundary layers and wakes.
     vec4  solid          = sample_solids(self.position, sim.tunnel_size, sim.solid_size);
     float solid_distance = solid.x;
+    vec2  solid_normal   = normalize(solid.yz + vec2(0.0F, 1.0e-12F));
 
     if (solid_distance < 2.0F * h)
     {
-        vec2 normal = normalize(solid.yz + vec2(0.0F, 1.0e-12F));
+        vec2 normal = solid_normal;
 
         acceleration += wall_acceleration(solid_distance, normal, density, pressure);
 
@@ -115,6 +149,34 @@ void main()
     // Semi-implicit Euler: the new velocity is used to update the position.
     vec2 velocity = self.velocity + (acceleration * sim.delta_time);
     vec2 position = self.position + (velocity * sim.delta_time);
+
+    if (shifting)
+    {
+        // Walls count as fluid (as for the density), so particles aren't pulled into them.
+        vec2 concentration_gradient = (sim.particle_mass * gradient_scale()) * concentration_sum;
+        concentration_gradient -= wall_gradient(self.position.y) * vec2(0.0F, 1.0F);
+        concentration_gradient -= wall_gradient(sim.tunnel_size.y - self.position.y) * vec2(0.0F, -1.0F);
+        concentration_gradient -= wall_gradient(solid_distance) * solid_normal;
+        if (!flowing)
+        {
+            concentration_gradient -= wall_gradient(self.position.x) * vec2(1.0F, 0.0F);
+            concentration_gradient -= wall_gradient(sim.tunnel_size.x - self.position.x) * vec2(-1.0F, 0.0F);
+        }
+
+        float speed = max(length(self.velocity), sim.flow_speed);
+        vec2  shift = (-SHIFTING_STRENGTH * h * speed * sim.delta_time) * concentration_gradient;
+
+        float max_shift = SHIFTING_LIMIT * h;
+        float shift_sq  = dot(shift, shift);
+        if (shift_sq > max_shift * max_shift)
+        {
+            shift *= max_shift * inversesqrt(shift_sq);
+        }
+
+        // Velocities are not corrected for the shift (with a Taylor expansion, as in Lind
+        // et al.): the correction made the venturis unstable, and the shifts are small.
+        position += shift;
+    }
 
     apply_boundaries(index, position, velocity);
 

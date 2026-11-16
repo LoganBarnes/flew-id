@@ -24,6 +24,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "model", "Gas (colliding disks) or SPH (smooth parcels of fluid)",
           cxxopts::value< std::string >( ) )
         ( "no-buffers", "Reset particles in a thin inlet region instead of buffer zones at both ends" )
+        ( "no-shifting", "SPH: don't nudge particles towards an even spacing" )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "field-scale", "Collision cells (per direction) averaged into one flow field cell",
           cxxopts::value< ltb::uint32 >( ) )
@@ -94,6 +95,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
                 = ( name == "SPH" ) ? ltb::flew::FluidModel::Sph : ltb::flew::FluidModel::Gas;
         }
         app_options.no_buffers     = ( args.count( "no-buffers" ) > 0UZ );
+        app_options.no_shifting    = ( args.count( "no-shifting" ) > 0UZ );
         app_options.respawn        = ( args.count( "respawn" ) > 0UZ );
         if ( args.count( "field-scale" ) > 0UZ )
         {

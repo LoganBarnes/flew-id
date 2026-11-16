@@ -67,7 +67,7 @@ struct StepConstants
     uint32     field_scale = 1U;
     float32    field_blend = 0.0F;
 
-    uint32 boundary_flags = 0U;
+    uint32 flags = 0U;
 
     uint32  model            = 0U;
     float32 sound_speed      = 0.0F;
@@ -79,9 +79,10 @@ struct StepConstants
 // Vulkan only guarantees 128 bytes of push constants.
 static_assert( sizeof( StepConstants ) <= 128UZ );
 
-/// \brief Matches RESPAWN_FLAG and BUFFERS_FLAG in `particle.glsl`.
-constexpr auto respawn_flag = 1U;
-constexpr auto buffers_flag = 2U;
+/// \brief Matches RESPAWN_FLAG, BUFFERS_FLAG, and SHIFTING_FLAG in `particle.glsl`.
+constexpr auto respawn_flag  = 1U;
+constexpr auto buffers_flag  = 2U;
+constexpr auto shifting_flag = 4U;
 
 constexpr auto particles_a_range = 0UZ;
 constexpr auto particles_b_range = 1UZ;
@@ -160,6 +161,7 @@ auto default_sph_step_params( float32 const smoothing_length, float32 const flow
         .wall_friction    = 1.0F,
         .wall_restitution = 0.0F,
         .sound_speed      = sound_speed,
+        .shifting         = true,
     };
     // The pressure of a stiff fluid is noisy: a tiny difference in density is a large
     // difference in pressure, so sound waves easily hide the pressure of the flow.
@@ -561,8 +563,8 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         .field_scale = field_scale_,
         .field_blend = params.field_blend,
 
-        .boundary_flags = ( ( params.respawn || params.buffers ) ? respawn_flag : 0U )
-                        | ( params.buffers ? buffers_flag : 0U ),
+        .flags = ( ( params.respawn || params.buffers ) ? respawn_flag : 0U )
+               | ( params.buffers ? buffers_flag : 0U ) | ( params.shifting ? shifting_flag : 0U ),
 
         .model            = static_cast< uint32 >( settings_.model ),
         .sound_speed      = params.sound_speed,

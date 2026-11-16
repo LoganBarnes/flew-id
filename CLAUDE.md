@@ -114,6 +114,13 @@ ctest --test-dir cmake-build-default -C Debug
 - SPH wall handling (`sph.glsl`): walls contribute density and a pressure force using
   tabulated integrals of the kernel beyond a flat wall. The tables are specific to the
   Wendland C2 kernel; changing the kernel means recomputing them.
+- SPH particle shifting (`sph_integrate.comp`, on by default, `StepParams::shifting`) moves
+  particles down the concentration gradient; walls count as fluid so particles aren't pulled
+  into them. It is a bit in `StepConstants::flags` (`SHIFTING_FLAG`), shared with the
+  boundary flags because `StepConstants` is full. Correcting velocities for the shift (a
+  Taylor expansion) made the venturis blow up, so only positions move.
+- The solver uses summation density (no continuity equation), so delta-SPH density
+  diffusion does not apply as is.
 
 ## ltb-vlk
 
@@ -138,8 +145,8 @@ The full backlog, including ideas that were tried and rejected, is in `TODO.md`.
 - No scrubbable playback format yet (video only), no Coanda scenario, no 3D, no web port.
 - The closed `Box` scenario slowly gains energy (about 7% over 80k steps); there is no
   thermostat outside of the inflow region.
-- SPH has no particle shifting or density diffusion, so there is some acoustic noise in the
-  pressure field, and flow separates readily in the venturis' widening sections.
+- SPH pressure still shows some acoustic noise (hidden by the field averaging), and flow
+  separates readily in the venturis' widening sections; shifting didn't change either.
 - Density is not relaxed at the tunnel ends (only velocity), so uneven density wraps around.
   A real fix needs open ends that add and remove particles.
 - Field cells partly covered by a solid read as low density/pressure (a thin false rim).

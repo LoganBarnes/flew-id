@@ -28,6 +28,7 @@ struct CheckOptions
     ParticleSystemSettings system            = { };
     Scenario               scenario          = Scenario::Box;
     bool                   no_buffers        = false;
+    bool                   no_shifting       = false;
     /// \brief The fraction of the tunnel covered by particles in SPH mode.
     float32 sph_packing_fraction = 0.6F;
     uint64                 steps             = 5'000UZ;
@@ -90,6 +91,7 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
     }
     params.respawn       = options.respawn;
     params.buffers       = !options.no_buffers;
+    params.shifting      = sph && !options.no_shifting;
 
     LTB_CHECK( auto const initial_particles, particles.read_particles( command_pool, queue ) );
     auto const initial_stats
@@ -205,6 +207,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "p,particles", "Number of particles", cxxopts::value< ltb::uint32 >( ) )
         ( "scenario", "Box, Cylinder, Airfoil, Plate, Venturi, or LongVenturi", cxxopts::value< std::string >( ) )
         ( "no-buffers", "Reset particles in a thin inlet region instead of buffer zones at both ends" )
+        ( "no-shifting", "SPH: don't nudge particles towards an even spacing" )
         ( "model", "Gas or SPH", cxxopts::value< std::string >( ) )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "s,steps", "Number of simulation steps", cxxopts::value< ltb::uint64 >( ) )
@@ -237,7 +240,8 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
             }
             check_options.scenario = scenario.value( );
         }
-        check_options.no_buffers = ( args.count( "no-buffers" ) > 0UZ );
+        check_options.no_buffers  = ( args.count( "no-buffers" ) > 0UZ );
+        check_options.no_shifting = ( args.count( "no-shifting" ) > 0UZ );
         if ( args.count( "model" ) > 0UZ )
         {
             auto const name = args[ "model" ].as< std::string >( );

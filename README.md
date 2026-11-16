@@ -92,6 +92,8 @@ Each simulation step is a chain of compute passes (`res/shaders/`, driven by
    SPH: compute the density at every particle from its neighbors (`sph_density.comp`), then
    apply pressure and viscous forces and integrate (`sph_integrate.comp`). Walls count as
    fluid at rest, which keeps the pressure correct next to them and makes the fluid stick.
+   Particle shifting then nudges each particle away from clumps and into gaps, which keeps
+   them evenly spaced (`--no-shifting` or the GUI checkbox turns it off).
 5. Apply the tunnel ends, walls, and the signed distance field of the solids
    (`boundary.glsl`, `solid.glsl`).
 

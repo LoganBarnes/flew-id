@@ -60,7 +60,9 @@ layout(push_constant, std430) uniform StepConstants
     //
     // BUFFERS_FLAG: particles are reset in buffer zones at both ends of the tunnel
     // (more often the closer they are to the end) instead of only near the inlet.
-    uint boundary_flags;
+    //
+    // SHIFTING_FLAG: SPH particles are nudged towards an even spacing (see sph_integrate.comp).
+    uint flags;
 
     // Which fluid model is being simulated (MODEL_GAS or MODEL_SPH).
     uint model;
@@ -82,6 +84,7 @@ const uint MODEL_SPH = 1U;
 
 const uint RESPAWN_FLAG = 1U;
 const uint BUFFERS_FLAG = 2U;
+const uint SHIFTING_FLAG = 4U;
 
 // The number of values summed by a single workgroup of the prefix sum's up sweep.
 const uint SCAN_BLOCK_SIZE = 1024U;

@@ -35,6 +35,8 @@ struct AppOptions
     /// \brief Only reset particles in a thin region at the inlet instead of
     ///        in buffer zones at both ends of the tunnel.
     bool no_buffers = false;
+    /// \brief SPH: don't nudge particles towards an even spacing (`StepParams::shifting`).
+    bool no_shifting = false;
     /// \brief The background coloring to start with (None, Speed, Pressure, ...).
     std::string field = "Speed";
     /// \brief Start with the particles hidden.

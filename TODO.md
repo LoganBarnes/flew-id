@@ -6,13 +6,14 @@ with both models. Things already tried and rejected are listed at the end so the
 retried blindly.
 
 Current cost at 200k particles (RTX 4050, GPU time per step): Gas about 0.09 ms, SPH about
-0.29 ms, mostly `sph_integrate` (about 0.15) and `sph_density` (about 0.10).
+0.32 ms, mostly `sph_integrate` (about 0.18 with particle shifting, which adds about 0.03)
+and `sph_density` (about 0.10).
 
 ## Physics and correctness
 
-- [ ] **SPH particle shifting or density diffusion (delta-SPH).** Reduces the acoustic
-      noise in the pressure field and the early flow separation in the venturis' widening
-      sections (the pressure stays low after the throat).
+- [ ] **Venturi separation in SPH.** The pressure stays low after the throat (the flow
+      separates in the widening section). Particle shifting didn't change it, so look at
+      resolution, viscosity, and the wall treatment of curved solids.
 - [ ] **Open tunnel ends.** Density is not relaxed at the ends (only velocity), so uneven
       density wraps around. The real fix is inflow and outflow that add and remove particles.
 - [ ] **Box energy drift.** The closed `Box` gains about 7% energy over 80k steps. Add a
@@ -62,6 +63,10 @@ Current cost at 200k particles (RTX 4050, GPU time per step): Gas about 0.09 ms,
       throat, sound ratio) and reports `flew-check` stats, instead of tuning by hand.
 
 ## Tried and rejected
+
+- **Velocity correction for particle shifting** (Taylor expansion with the velocity
+  gradient, Lind et al. 2012). The Venturi blew up within 10k steps (max speed 0.45 to 20).
+  Shifting positions only is stable.
 
 - **Shared-memory neighbor cache for the SPH passes.** Slower on NVIDIA (integrate 0.15 to
   0.26 ms) and AMD (0.25 to 0.40 ms): the sorted neighbor reads already hit the L1 cache.

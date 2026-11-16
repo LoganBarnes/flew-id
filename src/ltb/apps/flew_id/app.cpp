@@ -285,6 +285,11 @@ auto FlewIdApp::configure_gui( ) -> void
                 "How strongly the fluid resists compression. Around ten times the\n"
                 "flow speed behaves as incompressible. Higher values need a smaller time step."
             );
+            ImGui::Checkbox( "Particle shifting", &step_params_.shifting );
+            ImGui::SetItemTooltip(
+                "Nudge particles away from clumps and into gaps, which keeps\n"
+                "them evenly spaced."
+            );
         }
         else
         {
@@ -552,6 +557,11 @@ auto FlewIdApp::start_scenario( ) -> utils::Result< void >
             // Keep any adjustments made to the fluid.
             step_params_.viscosity     = previous.viscosity;
             step_params_.wall_friction = previous.wall_friction;
+            step_params_.shifting      = previous.shifting;
+        }
+        else if ( sph )
+        {
+            step_params_.shifting = !app_options( ).no_shifting;
         }
         params_model_ = model_;
     }

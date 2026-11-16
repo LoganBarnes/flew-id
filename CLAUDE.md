@@ -43,6 +43,10 @@ ctest --test-dir cmake-build-default -C Debug
 # (--model Gas, --model SPH) after simulation changes.
 ./cmake-build-default/src/ltb/apps/Debug/flew-check --model SPH --scenario Airfoil --steps 10000
 
+# Per-pass GPU timings (timestamp queries), averaged over the run. Use this before and
+# after performance changes.
+./cmake-build-default/src/ltb/apps/Debug/flew-check --model SPH --scenario Airfoil --steps 10000 --profile
+
 # Look at the result: run fast (--check uses 50 steps per update), save the last frame,
 # then open the PNG.
 ./cmake-build-default/src/ltb/apps/Debug/flew-id --scenario Airfoil --field Pressure --hide-particles \
@@ -79,6 +83,12 @@ ctest --test-dir cmake-build-default -C Debug
   with the push constant block in `particle.glsl` (128 byte limit), and `DisplayUniforms`
   (`app.cpp`) with `display.glsl`.
 - `StepConstants` is exactly 128 bytes. Adding a field means removing or packing another.
+- Shader constants mirrored on the CPU: `SCAN_BLOCK_SIZE` (`particle.glsl`) and
+  `SCAN_THREADS` (`grid_scan_up.comp`) with `scan_block_size`/`scan_threads`, and
+  `SPH_CELL_REACH` (`sph.glsl`) with `sph_cell_subdivision` (all in `particle_system.cpp`).
+- SPH grid cells are half the kernel's support (searched 5x5), so the field scale is doubled
+  internally to keep field cells the same size. Shaders target Vulkan 1.1 (the prefix sum
+  uses subgroup arithmetic).
 - Every compute pipeline shares the same six storage buffer bindings (`particle.glsl`).
   Adding a binding means updating `initialize_pipeline` in `particle_system.cpp`.
 - The default time step and contact stiffness are tied together (`default_step_params`).

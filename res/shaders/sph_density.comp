@@ -22,58 +22,32 @@ void main()
 
     Particle self = particles_b[index];
 
+    float support_sq = 4.0F * sim.smoothing_length * sim.smoothing_length;
+
     // Every particle contributes to its own density.
-    float kernel_sum = kernel(0.0F);
+    float kernel_sum = kernel_shape(0.0F);
 
 #define NEIGHBOR(other, shift)                                                   \
     {                                                                            \
         vec2 offset = self.position - particles_b[other].position;               \
         offset.x   -= shift;                                                     \
-        kernel_sum += kernel(length(offset));                                    \
+        float dist_sq = dot(offset, offset);                                     \
+        if (dist_sq < support_sq)                                                \
+        {                                                                        \
+            kernel_sum += kernel_shape(dist_sq);                                 \
+        }                                                                        \
     }
 
     ivec2 coords     = cell_coords(self.position);
-    ivec2 lower_cell = max(coords - ivec2(1), ivec2(0));
-    ivec2 upper_cell = min(coords + ivec2(1), sim.grid_size - ivec2(1));
+    int   lower_y    = max(coords.y - SPH_CELL_REACH, 0);
+    int   upper_y    = min(coords.y + SPH_CELL_REACH, sim.grid_size.y - 1);
 
-    for (int y = lower_cell.y; y <= upper_cell.y; ++y)
+    for (int y = lower_y; y <= upper_y; ++y)
     {
-        // Cells in a row are contiguous in the sorted buffer so
-        // the whole row can be processed as a single range.
-        uint first_cell = cell_index(ivec2(lower_cell.x, y));
-        uint last_cell  = cell_index(ivec2(upper_cell.x, y));
-
-        uint first = (first_cell == 0U) ? 0U : grid[first_cell - 1U];
-        uint last  = grid[last_cell];
-
-        for (uint other = first; other < last; ++other)
-        {
-            if (other != index)
-            {
-                NEIGHBOR(other, 0.0F);
-            }
-        }
-
-        // When flowing, the left and right ends of the tunnel are connected so
-        // particles in the first and last columns are also neighbors.
-        if (flowing && (coords.x == 0 || coords.x == sim.grid_size.x - 1))
-        {
-            int   wrapped_x = (coords.x == 0) ? sim.grid_size.x - 1 : 0;
-            float shift     = (coords.x == 0) ? -sim.tunnel_size.x : sim.tunnel_size.x;
-
-            uint wrapped_cell = cell_index(ivec2(wrapped_x, y));
-
-            first = (wrapped_cell == 0U) ? 0U : grid[wrapped_cell - 1U];
-            last  = grid[wrapped_cell];
-
-            for (uint other = first; other < last; ++other)
-            {
-                NEIGHBOR(other, shift);
-            }
-        }
+        FOR_EACH_NEIGHBOR_IN_ROW(coords, y, index, flowing, NEIGHBOR);
     }
 
-    float density = sim.particle_mass * kernel_sum;
+    float density = sim.particle_mass * kernel_scale() * kernel_sum;
 
     // Walls count as fluid. Without this the density (and so the pressure) would
     // drop next to a wall and the fluid would be sucked against it.

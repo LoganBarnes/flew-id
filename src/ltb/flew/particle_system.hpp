@@ -28,6 +28,13 @@ enum class FluidModel : uint32
 
 constexpr auto fluid_model_names = std::array< char const*, 2 >{ "Gas", "SPH" };
 
+/// \brief The GPU time spent in one pass of a simulation step.
+struct PassTiming
+{
+    char const* name         = "";
+    float64     milliseconds = 0.0;
+};
+
 struct ParticleSystemSettings
 {
     FluidModel model = FluidModel::Gas;
@@ -37,7 +44,8 @@ struct ParticleSystemSettings
     /// \brief The resolution of the distance field used to collide with the solids.
     glm::ivec2 solid_field_size = { 1024, 512 };
     /// \brief The flow fields are measured on a coarser grid than the one used for collisions.
-    ///        Each field cell covers this many collision cells in each direction.
+    ///        Each field cell covers this many collision cells in each direction (for SPH,
+    ///        cells as wide as the kernel's support).
     uint32 field_cell_scale = 6U;
     /// \brief SPH: the distance within which particles interact, as a multiple of the
     ///        average spacing between particles. The smoothing length is half of this.
@@ -145,6 +153,13 @@ public:
     /// \brief Records the commands required to advance the simulation by one step.
     auto record_step( vk::CommandBuffer const& command_buffer, StepParams const& params ) -> void;
 
+    /// \brief Records GPU timestamps around every pass of each recorded step.
+    auto enable_profiling( ) -> utils::Result< void >;
+
+    /// \brief Waits for the GPU to finish and returns the time spent in each pass of the
+    ///        most recently executed step. Requires `enable_profiling`.
+    auto read_profile( ) -> utils::Result< std::vector< PassTiming > >;
+
     /// \brief Waits for the GPU to finish and copies the current particles back to the CPU.
     auto read_particles( vlk::CommandPool& command_pool, vk::Queue const& queue )
         -> utils::Result< std::vector< Particle > >;
@@ -205,6 +220,8 @@ private:
     /// \brief The time averaged flow fields.
     vlk::objs::VulkanBuffer fields_     = { gpu_ };
     glm::ivec2              field_size_ = { };
+    /// \brief The number of grid cells covered by a field cell in each direction.
+    uint32 field_scale_ = 1U;
 
     uint32 step_index_ = 0U;
 
@@ -216,6 +233,10 @@ private:
     vlk::objs::VulkanComputePipeline fields_pipeline_    = { gpu_ };
     vlk::objs::VulkanComputePipeline sph_density_pipeline_   = { gpu_ };
     vlk::objs::VulkanComputePipeline sph_integrate_pipeline_ = { gpu_ };
+
+    /// \brief Profiling: one timestamp at the start of a step and one after each pass.
+    vk::UniqueQueryPool        query_pool_ = { };
+    std::vector< char const* > pass_names_ = { };
 
     bool initialized_ = false;
 

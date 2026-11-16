@@ -6,32 +6,41 @@
 //
 // Requires particle.glsl.
 
-// The Wendland C2 kernel in two dimensions.
-float kernel(float dist)
+// The Wendland C2 kernel in two dimensions:
+//
+//   W(r) = (7 / (4 pi h^2)) t^4 (2 q + 1),   q = r / h,   t = 1 - q / 2   (zero when q >= 2)
+//
+// The neighbor loops evaluate it in pieces so constants can be applied once per particle.
+
+// The normalization of the kernel, 7 / (4 pi h^2).
+float kernel_scale()
 {
     float h = sim.smoothing_length;
-    float q = dist / h;
-    if (q >= 2.0F)
-    {
-        return 0.0F;
-    }
-    float t = 1.0F - (0.5F * q);
-    return (7.0F / (4.0F * 3.14159265F * h * h)) * (t * t * t * t) * ((2.0F * q) + 1.0F);
+    return 7.0F / (4.0F * 3.14159265F * h * h);
 }
 
-// The gradient of the kernel with respect to the position of the particle at
-// the start of `offset` (offset = this particle's position - the other's).
-vec2 kernel_gradient(vec2 offset, float dist)
+// W(r) / kernel_scale() for a squared distance within the support (r < 2 h).
+float kernel_shape(float dist_sq)
+{
+    float q = sqrt(dist_sq) / sim.smoothing_length;
+    float t = 1.0F - (0.5F * q);
+    return (t * t) * (t * t) * ((2.0F * q) + 1.0F);
+}
+
+// The gradient of the kernel is gradient_scale() * t^3 * offset, where offset is this
+// particle's position minus the other's. (dW/dr = -5 q t^3 kernel_scale() / h, and the
+// direction offset / r cancels the q.)
+float gradient_scale()
 {
     float h = sim.smoothing_length;
-    float q = dist / h;
-    if (q >= 2.0F || dist < 1.0e-9F)
-    {
-        return vec2(0.0F);
-    }
-    float t          = 1.0F - (0.5F * q);
-    float derivative = (7.0F / (4.0F * 3.14159265F * h * h)) * (-5.0F * q) * (t * t * t) / h;
-    return derivative * (offset / dist);
+    return -5.0F * kernel_scale() / (h * h);
+}
+
+// t^3 for a squared distance within the support (r < 2 h).
+float gradient_shape(float dist_sq)
+{
+    float t = 1.0F - (0.5F * sqrt(dist_sq) / sim.smoothing_length);
+    return t * t * t;
 }
 
 // Solid walls are treated as if they were filled with fluid at the average density.
@@ -63,6 +72,55 @@ float wall_fraction(float wall_distance)
 float wall_gradient(float wall_distance)
 {
     return wall_table(WALL_SLOPE, wall_distance) / sim.smoothing_length;
+}
+
+// Grid cells are half the kernel's support wide (see `sph_cell_subdivision` in
+// particle_system.cpp), so neighbors are up to this many cells away in each direction.
+const int SPH_CELL_REACH = 2;
+
+// Runs NEIGHBOR(other, shift) for every particle within SPH_CELL_REACH cells of `coords`
+// in grid row `y`, except particle `self_index`. Cells in a row are contiguous in the
+// sorted buffer so each run of cells is processed as a single range. When `flowing`,
+// the ends of the tunnel are connected: cells beyond one end wrap around to the other,
+// and `shift` is subtracted from the x offset to the neighbor.
+#define FOR_EACH_NEIGHBOR_IN_ROW(coords, y, self_index, flowing, NEIGHBOR)                     \
+    {                                                                                          \
+        int  lower_x = coords.x - SPH_CELL_REACH;                                              \
+        int  upper_x = coords.x + SPH_CELL_REACH;                                              \
+        uint first   = row_start(max(lower_x, 0), y);                                          \
+        uint last    = grid[cell_index(ivec2(min(upper_x, sim.grid_size.x - 1), y))];         \
+        for (uint other = first; other < last; ++other)                                        \
+        {                                                                                      \
+            if (other != self_index)                                                           \
+            {                                                                                  \
+                NEIGHBOR(other, 0.0F);                                                         \
+            }                                                                                  \
+        }                                                                                      \
+        if (flowing && lower_x < 0)                                                            \
+        {                                                                                      \
+            first = row_start(sim.grid_size.x + lower_x, y);                                   \
+            last  = grid[cell_index(ivec2(sim.grid_size.x - 1, y))];                           \
+            for (uint other = first; other < last; ++other)                                    \
+            {                                                                                  \
+                NEIGHBOR(other, -sim.tunnel_size.x);                                           \
+            }                                                                                  \
+        }                                                                                      \
+        if (flowing && upper_x >= sim.grid_size.x)                                             \
+        {                                                                                      \
+            first = row_start(0, y);                                                           \
+            last  = grid[cell_index(ivec2(upper_x - sim.grid_size.x, y))];                     \
+            for (uint other = first; other < last; ++other)                                    \
+            {                                                                                  \
+                NEIGHBOR(other, sim.tunnel_size.x);                                            \
+            }                                                                                  \
+        }                                                                                      \
+    }
+
+// The index of the first sorted particle in cell (x, y).
+uint row_start(int x, int y)
+{
+    uint cell = cell_index(ivec2(x, y));
+    return (cell == 0U) ? 0U : grid[cell - 1U];
 }
 
 // The average density of the fluid (the particle mass is chosen to make this 1).

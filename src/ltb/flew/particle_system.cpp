@@ -24,7 +24,16 @@ namespace
 {
 
 /// \brief Matches `SCAN_BLOCK_SIZE` in `particle.glsl`.
-constexpr auto scan_block_size = 256U;
+constexpr auto scan_block_size = 1024U;
+/// \brief Matches `SCAN_THREADS` in `grid_scan_up.comp`.
+constexpr auto scan_threads = 256U;
+
+/// \brief SPH grid cells are this fraction of the kernel's support wide. Matches
+///        `SPH_CELL_REACH` in `sph.glsl` (the number of cells searched in each direction).
+constexpr auto sph_cell_subdivision = 2;
+
+/// \brief More than the number of timestamps written in a single step.
+constexpr auto max_timestamps = 32U;
 
 /// \brief Matches `StepConstants` in `particle.glsl`.
 struct StepConstants
@@ -205,7 +214,7 @@ auto ParticleSystem::initialize(
             {
                 return 0.0F;
             }
-            // Matches `kernel` in `sph.glsl`.
+            // Matches `kernel_scale( ) * kernel_shape( )` in `sph.glsl`.
             auto const t = 1.0F - ( 0.5F * q );
             return ( 7.0F / ( 4.0F * glm::pi< float32 >( ) * h * h ) ) * ( t * t * t * t )
                  * ( ( 2.0F * q ) + 1.0F );
@@ -234,7 +243,21 @@ auto ParticleSystem::initialize(
     grid_size_ = glm::max( glm::ivec2( 1 ), glm::ivec2( settings_.tunnel.size / interaction_distance ) );
 
     LTB_CHECK_VALID( settings_.field_cell_scale > 0U );
-    auto const field_scale = static_cast< int32 >( settings_.field_cell_scale );
+    field_scale_ = settings_.field_cell_scale;
+
+    if ( FluidModel::Sph == settings_.model )
+    {
+        // SPH cells are subdivided so the cells searched for neighbors hug the kernel's
+        // circular support more closely (fewer particles out of range are checked). The
+        // field cells keep covering whole undivided cells.
+        grid_size_ *= sph_cell_subdivision;
+        field_scale_ *= static_cast< uint32 >( sph_cell_subdivision );
+
+        // The wrapped columns at the ends of the tunnel must not overlap.
+        LTB_CHECK_VALID( grid_size_.x > 2 * sph_cell_subdivision );
+    }
+
+    auto const field_scale = static_cast< int32 >( field_scale_ );
     field_size_            = ( grid_size_ + ( field_scale - 1 ) ) / field_scale;
 
     auto offset = 0U;
@@ -260,6 +283,21 @@ auto ParticleSystem::initialize(
             queue
         )
     );
+
+    // The prefix sum uses subgroup arithmetic (core since Vulkan 1.1, but optional).
+    {
+        auto const properties = gpu_.physical_device( )
+                                    .get( )
+                                    .getProperties2<
+                                        vk::PhysicalDeviceProperties2,
+                                        vk::PhysicalDeviceSubgroupProperties >( )
+                                    .get< vk::PhysicalDeviceSubgroupProperties >( );
+
+        LTB_CHECK_VALID( properties.supportedStages & vk::ShaderStageFlagBits::eCompute );
+        LTB_CHECK_VALID(
+            properties.supportedOperations & vk::SubgroupFeatureFlagBits::eArithmetic
+        );
+    }
 
     LTB_CHECK( this->initialize_pipeline( count_pipeline_, "grid_count.comp.spv" ) );
     LTB_CHECK( this->initialize_pipeline( scan_up_pipeline_, "grid_scan_up.comp.spv" ) );
@@ -514,7 +552,7 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         .wall_restitution = params.wall_restitution,
 
         .field_size  = field_size_,
-        .field_scale = settings_.field_cell_scale,
+        .field_scale = field_scale_,
         .field_blend = params.field_blend,
 
         .boundary_flags = ( ( params.respawn || params.buffers ) ? respawn_flag : 0U )
@@ -552,10 +590,32 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         full_barrier( command_buffer );
     };
 
+    // Profiling: timestamps after each pass (every pass ends with a full barrier).
+    auto const mark = [ & ]( char const* const name ) {
+        if ( query_pool_ )
+        {
+            command_buffer.writeTimestamp(
+                vk::PipelineStageFlagBits::eBottomOfPipe,
+                query_pool_.get( ),
+                static_cast< uint32 >( pass_names_.size( ) + 1UZ )
+            );
+            pass_names_.push_back( name );
+        }
+    };
+
     auto const particle_count = settings_.fill.particle_count;
 
-    // 1. Clear the cell counters.
     full_barrier( command_buffer );
+
+    if ( query_pool_ )
+    {
+        pass_names_.clear( );
+        command_buffer.resetQueryPool( query_pool_.get( ), 0U, max_timestamps );
+        command_buffer
+            .writeTimestamp( vk::PipelineStageFlagBits::eBottomOfPipe, query_pool_.get( ), 0U );
+    }
+
+    // 1. Clear the cell counters.
     command_buffer.fillBuffer(
         grid_.buffer( ).get( ),
         0U,
@@ -563,9 +623,11 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         0U
     );
     full_barrier( command_buffer );
+    mark( "clear" );
 
     // 2. Count the particles in each cell.
     dispatch( count_pipeline_, particle_count, 256U );
+    mark( "count" );
 
     // 3. Prefix sum. Sweep up the hierarchy summing blocks, then back down adding offsets.
     for ( auto level = 0UZ; ( level + 1UZ ) < scan_levels_.size( ); ++level )
@@ -575,7 +637,11 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         constants.scan_parent_offset = scan_levels_[ level + 1UZ ].offset;
 
         // One workgroup per block (the parent level has one element per block).
-        dispatch( scan_up_pipeline_, scan_levels_[ level + 1UZ ].count * scan_block_size, 256U );
+        dispatch(
+            scan_up_pipeline_,
+            scan_levels_[ level + 1UZ ].count * scan_threads,
+            scan_threads
+        );
     }
     for ( auto level = scan_levels_.size( ) - 2UZ; level-- > 0UZ; )
     {
@@ -585,9 +651,11 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
 
         dispatch( scan_down_pipeline_, scan_levels_[ level ].count, 256U );
     }
+    mark( "scan" );
 
     // 4. Sort the particles by cell.
     dispatch( scatter_pipeline_, particle_count, 256U );
+    mark( "scatter" );
 
     auto const field_count = static_cast< uint32 >( field_size_.x )
                            * static_cast< uint32 >( field_size_.y );
@@ -597,19 +665,80 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         // 5. The density of the fluid at each particle, then the flow
         //    fields (which include the pressure computed from the density).
         dispatch( sph_density_pipeline_, particle_count, 256U );
+        mark( "sph_density" );
         dispatch( fields_pipeline_, field_count, 64U );
+        mark( "fields" );
 
         // 6. Pressure and viscous forces, then integrate.
         dispatch( sph_integrate_pipeline_, particle_count, 256U );
+        mark( "sph_integrate" );
     }
     else
     {
         // Measure the flow fields from the sorted particles.
         dispatch( fields_pipeline_, field_count, 64U );
+        mark( "fields" );
 
         // 5. Collide and integrate.
         dispatch( collide_pipeline_, particle_count, 256U );
+        mark( "collide_integrate" );
     }
+}
+
+auto ParticleSystem::enable_profiling( ) -> utils::Result< void >
+{
+    LTB_CHECK_VALID( this->is_initialized( ) );
+
+    auto const& limits = gpu_.physical_device( ).properties( ).limits;
+    if ( ( VK_FALSE == limits.timestampComputeAndGraphics ) || ( limits.timestampPeriod <= 0.0F ) )
+    {
+        return LTB_MAKE_UNEXPECTED_ERROR( "The GPU does not support compute timestamps" );
+    }
+
+    VK_CHECK(
+        query_pool_,
+        gpu_.device( ).get( ).createQueryPoolUnique(
+            vk::QueryPoolCreateInfo{ }
+                .setQueryType( vk::QueryType::eTimestamp )
+                .setQueryCount( max_timestamps )
+        )
+    );
+    return utils::success( );
+}
+
+auto ParticleSystem::read_profile( ) -> utils::Result< std::vector< PassTiming > >
+{
+    LTB_CHECK_VALID( query_pool_ );
+    LTB_CHECK_VALID( !pass_names_.empty( ) );
+
+    VK_CHECK( gpu_.device( ).get( ).waitIdle( ) );
+
+    auto timestamps = std::vector< uint64 >( pass_names_.size( ) + 1UZ );
+
+    VK_CHECK( gpu_.device( ).get( ).getQueryPoolResults(
+        query_pool_.get( ),
+        0U,
+        static_cast< uint32 >( timestamps.size( ) ),
+        timestamps.size( ) * sizeof( uint64 ),
+        timestamps.data( ),
+        sizeof( uint64 ),
+        vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait
+    ) );
+
+    auto const nanoseconds_per_tick
+        = static_cast< float64 >( gpu_.physical_device( ).properties( ).limits.timestampPeriod );
+
+    auto timings = std::vector< PassTiming >{ };
+    timings.reserve( pass_names_.size( ) );
+    for ( auto i = 0UZ; i < pass_names_.size( ); ++i )
+    {
+        timings.push_back( {
+            .name         = pass_names_[ i ],
+            .milliseconds = static_cast< float64 >( timestamps[ i + 1UZ ] - timestamps[ i ] )
+                          * nanoseconds_per_tick * 1.0e-6,
+        } );
+    }
+    return timings;
 }
 
 auto ParticleSystem::read_particles( vlk::CommandPool& command_pool, vk::Queue const& queue )

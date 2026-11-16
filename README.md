@@ -57,6 +57,9 @@ from that local copy, so changes made in `ltb-vlk/` are picked up immediately.
 # The same verification with no window.
 ./build/src/ltb/apps/Release/flew-check --scenario Venturi --steps 10000 --particles 1000000
 
+# Print the GPU time spent in each compute pass.
+./build/src/ltb/apps/Release/flew-check --model SPH --scenario Airfoil --steps 10000 --profile
+
 # Record a video (requires ffmpeg): 400 simulation steps per frame, background only.
 ./build/src/ltb/apps/Release/flew-id --scenario Cylinder --field Vorticity --hide-particles \
     --hide-gui --steps 120000 --steps-per-frame 400 --video cylinder.mp4
@@ -80,7 +83,8 @@ it is the averages that behave like a fluid.
 Each simulation step is a chain of compute passes (`res/shaders/`, driven by
 `src/ltb/flew/particle_system.cpp`):
 
-1. Count the particles in each cell of a uniform grid (cells are one particle diameter wide).
+1. Count the particles in each cell of a uniform grid (gas: cells are one particle diameter
+   wide; SPH: half the kernel's support, searching two cells in each direction).
 2. Prefix sum the counts to find where each cell's particles start.
 3. Scatter the particles into a second buffer sorted by cell.
 4. Gas: for every particle, apply spring/damping forces from overlapping particles in the

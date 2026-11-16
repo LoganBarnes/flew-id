@@ -27,7 +27,7 @@ foreach( SHADER_FILE ${LtbFlew_SHADERS} )
   add_custom_command(
     OUTPUT ${SPIRV_FILE}
     COMMAND $<TARGET_FILE:Vulkan::glslc>
-    ARGS -I ${CMAKE_CURRENT_LIST_DIR} ${SHADER_FILE} -o ${SPIRV_FILE}
+    ARGS --target-env=vulkan1.1 -I ${CMAKE_CURRENT_LIST_DIR} ${SHADER_FILE} -o ${SPIRV_FILE}
     DEPENDS ${SHADER_FILE} ${LtbFlew_SHADER_INCLUDES}
     COMMENT "Compiling ${SHADER_NAME}"
     VERBATIM

@@ -83,8 +83,8 @@ const uint MODEL_SPH = 1U;
 const uint RESPAWN_FLAG = 1U;
 const uint BUFFERS_FLAG = 2U;
 
-// The number of cells summed by a single invocation of the prefix sum passes.
-const uint SCAN_BLOCK_SIZE = 256U;
+// The number of values summed by a single workgroup of the prefix sum's up sweep.
+const uint SCAN_BLOCK_SIZE = 1024U;
 
 // All compute passes share the same bindings.
 //  - particles_a holds the current state at the start and end of every step.

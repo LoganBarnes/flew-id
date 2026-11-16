@@ -38,77 +38,52 @@ void main()
     float    density  = densities[index];
     float    pressure = pressure_from_density(density);
 
-    float h = sim.smoothing_length;
+    float h          = sim.smoothing_length;
+    float support_sq = 4.0F * h * h;
 
-    vec2 acceleration = vec2(0.0F);
+    // Terms of the pair forces that only depend on this particle.
+    float pressure_term   = pressure / (density * density);
+    float viscous_rate    = 8.0F * sim.viscosity;
+    float viscous_epsilon = 0.01F * h * h;
+
+    // The pair forces are all along the kernel's gradient, gradient_scale() * t^3 * offset,
+    // so they are summed without the constant factors (applied after the loop).
+    vec2 pair_sum = vec2(0.0F);
 
 #define NEIGHBOR(other, shift)                                                               \
     {                                                                                        \
-        Particle neighbor = particles_b[other];                                              \
-        vec2  offset = self.position - neighbor.position;                                    \
+        vec2  offset = self.position - particles_b[other].position;                          \
         offset.x    -= shift;                                                                \
-        float dist   = length(offset);                                                       \
-        if (dist < 2.0F * h)                                                                 \
+        float dist_sq = dot(offset, offset);                                                 \
+        if (dist_sq < support_sq)                                                            \
         {                                                                                    \
             float other_density  = densities[other];                                         \
+            float inv_density    = 1.0F / other_density;                                     \
             float other_pressure = pressure_from_density(other_density);                     \
-            vec2  gradient       = kernel_gradient(offset, dist);                            \
                                                                                              \
             /* Pressure pushes particles from high to low pressure. This symmetric   */      \
             /* form applies equal and opposite forces to each pair of particles.     */      \
-            acceleration -= sim.particle_mass                                                \
-                          * ((pressure / (density * density))                                \
-                             + (other_pressure / (other_density * other_density)))           \
-                          * gradient;                                                        \
+            float strength = -(pressure_term + (other_pressure * inv_density * inv_density)); \
                                                                                              \
             /* Viscosity resists particles moving relative to their neighbors.       */      \
-            vec2 relative_velocity = self.velocity - neighbor.velocity;                      \
-            acceleration += 8.0F * sim.viscosity * (sim.particle_mass / other_density)       \
-                          * (dot(relative_velocity, offset) / ((dist * dist) + (0.01F * h * h))) \
-                          * gradient;                                                        \
+            vec2 relative_velocity = self.velocity - particles_b[other].velocity;            \
+            strength += viscous_rate * inv_density                                           \
+                      * (dot(relative_velocity, offset) / (dist_sq + viscous_epsilon));      \
+                                                                                             \
+            pair_sum += (strength * gradient_shape(dist_sq)) * offset;                       \
         }                                                                                    \
     }
 
     ivec2 coords     = cell_coords(self.position);
-    ivec2 lower_cell = max(coords - ivec2(1), ivec2(0));
-    ivec2 upper_cell = min(coords + ivec2(1), sim.grid_size - ivec2(1));
+    int   lower_y    = max(coords.y - SPH_CELL_REACH, 0);
+    int   upper_y    = min(coords.y + SPH_CELL_REACH, sim.grid_size.y - 1);
 
-    for (int y = lower_cell.y; y <= upper_cell.y; ++y)
+    for (int y = lower_y; y <= upper_y; ++y)
     {
-        // Cells in a row are contiguous in the sorted buffer so
-        // the whole row can be processed as a single range.
-        uint first_cell = cell_index(ivec2(lower_cell.x, y));
-        uint last_cell  = cell_index(ivec2(upper_cell.x, y));
-
-        uint first = (first_cell == 0U) ? 0U : grid[first_cell - 1U];
-        uint last  = grid[last_cell];
-
-        for (uint other = first; other < last; ++other)
-        {
-            if (other != index)
-            {
-                NEIGHBOR(other, 0.0F);
-            }
-        }
-
-        // When flowing, the left and right ends of the tunnel are connected so
-        // particles in the first and last columns are also neighbors.
-        if (flowing && (coords.x == 0 || coords.x == sim.grid_size.x - 1))
-        {
-            int   wrapped_x = (coords.x == 0) ? sim.grid_size.x - 1 : 0;
-            float shift     = (coords.x == 0) ? -sim.tunnel_size.x : sim.tunnel_size.x;
-
-            uint wrapped_cell = cell_index(ivec2(wrapped_x, y));
-
-            first = (wrapped_cell == 0U) ? 0U : grid[wrapped_cell - 1U];
-            last  = grid[wrapped_cell];
-
-            for (uint other = first; other < last; ++other)
-            {
-                NEIGHBOR(other, shift);
-            }
-        }
+        FOR_EACH_NEIGHBOR_IN_ROW(coords, y, index, flowing, NEIGHBOR);
     }
+
+    vec2 acceleration = (sim.particle_mass * gradient_scale()) * pair_sum;
 
     // The top and bottom of the tunnel push back but let the fluid slide freely.
     acceleration += wall_acceleration(self.position.y, vec2(0.0F, 1.0F), density, pressure);

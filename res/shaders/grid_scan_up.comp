@@ -1,41 +1,73 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 // Prefix sum, up sweep. Each workgroup replaces one block of the child level with
 // its exclusive prefix sum and writes the block's total to the parent level.
 
 #include "particle.glsl"
 
-layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+const uint SCAN_THREADS          = 256U;
+const uint SCAN_ITEMS_PER_THREAD = SCAN_BLOCK_SIZE / SCAN_THREADS;
 
-shared uint sums[SCAN_BLOCK_SIZE];
+layout (local_size_x = SCAN_THREADS, local_size_y = 1, local_size_z = 1) in;
+
+// The exclusive prefix sum of the subgroups' totals (one per subgroup at most).
+shared uint subgroup_offsets[SCAN_THREADS];
 
 void main()
 {
     uint block = gl_WorkGroupID.x;
-    uint local = gl_LocalInvocationID.x;
-    uint index = block * SCAN_BLOCK_SIZE + local;
+    uint first = (block * SCAN_BLOCK_SIZE) + (gl_LocalInvocationID.x * SCAN_ITEMS_PER_THREAD);
 
-    uint value = (index < sim.scan_child_count) ? grid[sim.scan_child_offset + index] : 0U;
-
-    // Inclusive Hillis-Steele scan in shared memory.
-    sums[local] = value;
-    for (uint stride = 1U; stride < SCAN_BLOCK_SIZE; stride <<= 1U)
+    // Each thread sums a few consecutive values...
+    uint values[SCAN_ITEMS_PER_THREAD];
+    uint thread_sum = 0U;
+    for (uint i = 0U; i < SCAN_ITEMS_PER_THREAD; ++i)
     {
-        barrier();
-        uint addend = (local >= stride) ? sums[local - stride] : 0U;
-        barrier();
-        sums[local] += addend;
+        uint index = first + i;
+        values[i]  = (index < sim.scan_child_count) ? grid[sim.scan_child_offset + index] : 0U;
+        thread_sum += values[i];
+    }
+
+    // ...then the thread sums are scanned within each subgroup...
+    uint inclusive = subgroupInclusiveAdd(thread_sum);
+    if (gl_SubgroupInvocationID == gl_SubgroupSize - 1U)
+    {
+        subgroup_offsets[gl_SubgroupID] = inclusive;
     }
     barrier();
 
-    if (index < sim.scan_child_count)
+    // ...and the first subgroup scans the subgroups' totals.
+    if (gl_SubgroupID == 0U)
     {
-        grid[sim.scan_child_offset + index] = sums[local] - value;
+        uint carry = 0U;
+        for (uint base = 0U; base < gl_NumSubgroups; base += gl_SubgroupSize)
+        {
+            uint i     = base + gl_SubgroupInvocationID;
+            uint total = (i < gl_NumSubgroups) ? subgroup_offsets[i] : 0U;
+            uint sum   = subgroupInclusiveAdd(total);
+            if (i < gl_NumSubgroups)
+            {
+                subgroup_offsets[i] = carry + sum - total;
+            }
+            carry += subgroupAdd(total);
+        }
+        if (gl_SubgroupInvocationID == 0U)
+        {
+            grid[sim.scan_parent_offset + block] = carry;
+        }
     }
+    barrier();
 
-    if (local == SCAN_BLOCK_SIZE - 1U)
+    uint sum = subgroup_offsets[gl_SubgroupID] + inclusive - thread_sum;
+    for (uint i = 0U; i < SCAN_ITEMS_PER_THREAD; ++i)
     {
-        grid[sim.scan_parent_offset + block] = sums[local];
+        uint index = first + i;
+        if (index < sim.scan_child_count)
+        {
+            grid[sim.scan_child_offset + index] = sum;
+        }
+        sum += values[i];
     }
 }

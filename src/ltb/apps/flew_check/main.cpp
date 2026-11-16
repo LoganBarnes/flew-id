@@ -32,6 +32,8 @@ struct CheckOptions
     float32 sph_packing_fraction = 0.6F;
     uint64                 steps             = 5'000UZ;
     bool                   respawn           = false;
+    /// \brief Print the average GPU time spent in each pass of a step.
+    bool profile = false;
 };
 
 /// \brief The number of steps recorded into a single command buffer.
@@ -96,6 +98,14 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
     auto command_buffer = vlk::CommandBuffer{ gpu.device( ), command_pool };
     LTB_CHECK( command_buffer.initialize( ) );
 
+    if ( options.profile )
+    {
+        LTB_CHECK( particles.enable_profiling( ) );
+    }
+    // The summed timings of the last step of every submit.
+    auto pass_timings  = std::vector< PassTiming >{ };
+    auto profile_count = 0UZ;
+
     auto const start_time = std::chrono::steady_clock::now( );
 
     for ( auto step = 0UZ; step < options.steps; step += steps_per_submit )
@@ -114,6 +124,23 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
 
         VK_CHECK( queue.submit( vk::SubmitInfo{ }.setCommandBuffers( command_buffer.get( ) ) ) );
         VK_CHECK( queue.waitIdle( ) );
+
+        if ( options.profile && ( step_count > 0UZ ) )
+        {
+            LTB_CHECK( auto const timings, particles.read_profile( ) );
+            if ( pass_timings.empty( ) )
+            {
+                pass_timings = timings;
+            }
+            else
+            {
+                for ( auto i = 0UZ; i < timings.size( ); ++i )
+                {
+                    pass_timings[ i ].milliseconds += timings[ i ].milliseconds;
+                }
+            }
+            ++profile_count;
+        }
     }
 
     auto const seconds
@@ -131,6 +158,24 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
         seconds,
         1000.0 * seconds / static_cast< float64 >( std::max( 1UZ, options.steps ) )
     );
+    if ( profile_count > 0UZ )
+    {
+        auto total = 0.0;
+        for ( auto const& timing : pass_timings )
+        {
+            total += timing.milliseconds;
+        }
+        for ( auto const& timing : pass_timings )
+        {
+            spdlog::info(
+                "  {:<18} {:.4f} ms ({:.1f}%)",
+                timing.name,
+                timing.milliseconds / static_cast< float64 >( profile_count ),
+                100.0 * timing.milliseconds / total
+            );
+        }
+        spdlog::info( "  {:<18} {:.4f} ms", "total", total / static_cast< float64 >( profile_count ) );
+    }
     spdlog::info( "Initial: {}", to_string( initial_stats ) );
     spdlog::info( "Final  : {}", to_string( final_stats ) );
 
@@ -163,6 +208,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "model", "Gas or SPH", cxxopts::value< std::string >( ) )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "s,steps", "Number of simulation steps", cxxopts::value< ltb::uint64 >( ) )
+        ( "profile", "Print the average GPU time spent in each pass of a step" )
         ( "h,help", "Print usage" );
 
     auto check_options = ltb::flew::CheckOptions{ };
@@ -204,6 +250,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
                 = ( name == "SPH" ) ? ltb::flew::FluidModel::Sph : ltb::flew::FluidModel::Gas;
         }
         check_options.respawn    = ( args.count( "respawn" ) > 0UZ );
+        check_options.profile    = ( args.count( "profile" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )
         {
             check_options.steps = args[ "steps" ].as< ltb::uint64 >( );

@@ -1,31 +1,41 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// Prefix sum, up sweep. Each invocation replaces one block of the child level with
+// Prefix sum, up sweep. Each workgroup replaces one block of the child level with
 // its exclusive prefix sum and writes the block's total to the parent level.
 
 #include "particle.glsl"
 
-layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+shared uint sums[SCAN_BLOCK_SIZE];
 
 void main()
 {
-    uint block = gl_GlobalInvocationID.x;
-    uint first = block * SCAN_BLOCK_SIZE;
-    if (first >= sim.scan_child_count)
+    uint block = gl_WorkGroupID.x;
+    uint local = gl_LocalInvocationID.x;
+    uint index = block * SCAN_BLOCK_SIZE + local;
+
+    uint value = (index < sim.scan_child_count) ? grid[sim.scan_child_offset + index] : 0U;
+
+    // Inclusive Hillis-Steele scan in shared memory.
+    sums[local] = value;
+    for (uint stride = 1U; stride < SCAN_BLOCK_SIZE; stride <<= 1U)
     {
-        return;
+        barrier();
+        uint addend = (local >= stride) ? sums[local - stride] : 0U;
+        barrier();
+        sums[local] += addend;
+    }
+    barrier();
+
+    if (index < sim.scan_child_count)
+    {
+        grid[sim.scan_child_offset + index] = sums[local] - value;
     }
 
-    uint last = min(first + SCAN_BLOCK_SIZE, sim.scan_child_count);
-    uint sum  = 0U;
-
-    for (uint i = first; i < last; ++i)
+    if (local == SCAN_BLOCK_SIZE - 1U)
     {
-        uint value = grid[sim.scan_child_offset + i];
-        grid[sim.scan_child_offset + i] = sum;
-        sum += value;
+        grid[sim.scan_parent_offset + block] = sums[local];
     }
-
-    grid[sim.scan_parent_offset + block] = sum;
 }

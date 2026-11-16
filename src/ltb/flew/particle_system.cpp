@@ -574,8 +574,8 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         constants.scan_child_count   = scan_levels_[ level ].count;
         constants.scan_parent_offset = scan_levels_[ level + 1UZ ].offset;
 
-        // One invocation per block (which is the size of the parent level).
-        dispatch( scan_up_pipeline_, scan_levels_[ level + 1UZ ].count, 64U );
+        // One workgroup per block (the parent level has one element per block).
+        dispatch( scan_up_pipeline_, scan_levels_[ level + 1UZ ].count * scan_block_size, 256U );
     }
     for ( auto level = scan_levels_.size( ) - 2UZ; level-- > 0UZ; )
     {

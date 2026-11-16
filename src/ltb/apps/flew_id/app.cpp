@@ -334,7 +334,7 @@ auto FlewIdApp::configure_gui( ) -> void
         ImGui::SliderFloat(
             "Field smoothing",
             &step_params_.field_blend,
-            0.0005F,
+            0.0001F,
             1.0F,
             "%.4f",
             ImGuiSliderFlags_Logarithmic

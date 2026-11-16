@@ -140,6 +140,9 @@ auto default_sph_step_params( float32 const smoothing_length, float32 const flow
     constexpr auto sound_ratio = 10.0F;
     // The fraction of the smoothing length a sound wave may cross in one step.
     constexpr auto courant_number = 0.25F;
+    // The fields are averaged over the time sound takes to travel this far (the height
+    // of the tunnel), which smooths out sound waves bouncing between its walls.
+    constexpr auto field_average_distance = 2.0F;
 
     auto const max_speed   = std::max( flow_speed * speed_up, minimum_speed );
     auto const sound_speed = sound_ratio * max_speed;
@@ -156,10 +159,13 @@ auto default_sph_step_params( float32 const smoothing_length, float32 const flow
         // Fully no-slip solids, and no bouncing.
         .wall_friction    = 1.0F,
         .wall_restitution = 0.0F,
-        // The fields are not noisy so they need very little averaging.
-        .field_blend = 0.05F,
-        .sound_speed = sound_speed,
+        .sound_speed      = sound_speed,
     };
+    // The pressure of a stiff fluid is noisy: a tiny difference in density is a large
+    // difference in pressure, so sound waves easily hide the pressure of the flow.
+    auto const field_average_time = field_average_distance / sound_speed;
+    params.field_blend            = std::min( params.delta_time / field_average_time, 1.0F );
+
     // The background pressure is a few times the dynamic pressure of the flow: enough
     // to keep the pressure positive in the low pressure regions around solids.
     params.rest_density = 1.0F - ( 4.0F * max_speed * max_speed / ( sound_speed * sound_speed ) );

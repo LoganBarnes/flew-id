@@ -106,6 +106,11 @@ ctest --test-dir cmake-build-default -C Debug
   exactly 1 (`ParticleSystem::initialize`). A 1% density error is a large pressure error
   because the fluid is stiff, so pressure is displayed relative to the measured inflow
   pressure (`undisturbed_pressure` in `field.frag`), not a nominal value.
+- SPH fields are averaged over the time sound takes to cross the tunnel height
+  (`default_sph_step_params`). Shorter averages mostly show sound waves bouncing between the
+  walls, not the flow. Starting the flow gradually did not reduce those waves.
+- Caching neighbors in shared memory was tried for the SPH passes and was slower on both
+  NVIDIA and AMD: the sorted neighbor reads already hit the L1 cache.
 - SPH wall handling (`sph.glsl`): walls contribute density and a pressure force using
   tabulated integrals of the kernel beyond a flat wall. The tables are specific to the
   Wendland C2 kernel; changing the kernel means recomputing them.

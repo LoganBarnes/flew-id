@@ -133,6 +133,8 @@ designated initializers, fixed-width aliases (`float32`, `uint32`), and the file
 
 ## Known gaps
 
+The full backlog, including ideas that were tried and rejected, is in `TODO.md`.
+
 - No scrubbable playback format yet (video only), no Coanda scenario, no 3D, no web port.
 - The closed `Box` scenario slowly gains energy (about 7% over 80k steps); there is no
   thermostat outside of the inflow region.

@@ -18,6 +18,8 @@ layout(std140, binding = 0) uniform DisplayUbo
     // How the particles are colored (see PARTICLE_* in display.glsl).
     int   particle_mode;
     float particle_brightness;
+    // The length of the buffer zone at each end of the tunnel (zero if there are none).
+    float buffer_width;
 } display;
 
 const int FIELD_NONE        = 0;

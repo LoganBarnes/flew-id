@@ -45,10 +45,10 @@ from that local copy, so changes made in `ltb-vlk/` are picked up immediately.
 Scenarios: `Box`, `Cylinder`, `Airfoil`, `Plate`, `Venturi`, `LongVenturi`. Use `--help` for
 all options.
 
-The venturi scenarios choke at the default flow speed and throat (pressure builds up before
-the constriction and the flow leaves it as a jet). For the textbook picture of faster flow
-and lower pressure in the throat, use a slower flow and a wider throat, e.g.
-`--scenario LongVenturi --flow 0.2 --throat 0.5`.
+The venturi scenarios start with a slower flow (0.2) and a wider throat (half the tunnel's
+height) than the other scenarios' defaults. The fluid is compressible, so a fast flow
+through a narrow throat chokes: pressure builds up before the constriction and the flow
+leaves it as a jet (try `--flow 0.5 --throat 0.33`).
 
 The background can be colored by `Speed`, `Pressure`, `Density`, `Vorticity`, or
 `Temperature` (`--field`, or the Display section of the settings window). These are
@@ -67,8 +67,13 @@ Each simulation step is a chain of compute passes (`res/shaders/`, driven by
    neighboring cells (`interaction.glsl`), integrate, and collide with the tunnel walls and
    the signed distance field of the solids (`solid.glsl`).
 
-When there is flow, the left and right ends of the tunnel are connected and particles
-passing through a thin region on the left are reset to the incoming flow conditions.
-With `--respawn` (or "Respawn at tunnel ends" in the settings window) every particle that
-crosses an end of the tunnel is also replaced by a new particle of the undisturbed flow, as
-if the tunnel continued far beyond both ends.
+When there is flow, the left and right ends of the tunnel are connected. Buffer zones at
+both ends (lightly tinted in the app) randomly reset particles to the undisturbed flow, more
+often the closer they are to the end, and every particle crossing an end becomes a new
+particle of that flow. The outlet buffer absorbs wakes before they can wrap around and the
+inlet buffer delivers a uniform velocity, like the diffuser and settling chamber of a real
+wind tunnel. The buffers reset velocities only: particles keep their positions, so uneven
+density is still carried around the ends.
+
+`--no-buffers` restores the original behavior (resets only in a thin region at the inlet),
+optionally with `--respawn` to also replace particles as they cross the ends.

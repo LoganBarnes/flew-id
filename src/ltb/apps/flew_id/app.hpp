@@ -26,8 +26,14 @@ struct AppOptions
     /// \brief Overrides the default number of particles when not zero.
     uint32 particle_count = 0U;
     /// \brief The scenario to start with and its settings.
-    Scenario         scenario          = Scenario::Airfoil;
-    ScenarioSettings scenario_settings = { };
+    Scenario scenario = Scenario::Airfoil;
+    /// \brief Overrides of the scenario's default settings.
+    std::optional< float32 > angle_degrees   = std::nullopt;
+    std::optional< float32 > flow_speed      = std::nullopt;
+    std::optional< float32 > throat_fraction = std::nullopt;
+    /// \brief Only reset particles in a thin region at the inlet instead of
+    ///        in buffer zones at both ends of the tunnel.
+    bool no_buffers = false;
     /// \brief The background coloring to start with (None, Speed, Pressure, ...).
     std::string field = "Speed";
     /// \brief Start with the particles hidden.

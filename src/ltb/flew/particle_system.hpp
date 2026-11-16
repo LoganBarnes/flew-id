@@ -65,6 +65,16 @@ struct StepParams
     ///        particle of the undisturbed incoming flow, as if the tunnel continued far
     ///        beyond both ends.
     bool respawn = false;
+
+    /// \brief Surround the ends of a flowing tunnel with buffer zones, like the settling
+    ///        chamber and diffuser of a real wind tunnel. Particles inside a buffer are
+    ///        randomly reset to the undisturbed flow, more often the closer they are to the
+    ///        end of the tunnel. The outlet buffer absorbs wakes and pressure waves before
+    ///        they can leave, and the inlet buffer delivers a uniform flow. Buffers replace
+    ///        the inflow region (`inflow_width`) and always respawn particles at the ends.
+    bool buffers = true;
+    /// \brief The length of the buffer zone at each end of the tunnel.
+    float32 buffer_width = 0.3F;
 };
 
 /// \brief Step parameters that keep the simulation stable for particles of the given size.

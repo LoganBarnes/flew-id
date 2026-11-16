@@ -41,6 +41,7 @@ struct DisplayUniforms
     float32 reference_temperature = 1.0F;
     int32   particle_mode         = 0;
     float32 particle_brightness   = 1.0F;
+    float32 buffer_width          = 0.0F;
 };
 
 constexpr auto field_mode_names = std::array{
@@ -212,6 +213,7 @@ auto FlewIdApp::configure_gui( ) -> void
              ) )
         {
             scenario_          = static_cast< Scenario >( scenario_index );
+            scenario_settings_ = default_scenario_settings( scenario_ );
             restart_requested_ = true;
         }
         ImGui::SliderFloat( "Angle of attack", &scenario_settings_.angle_degrees, -10.0F, 45.0F );
@@ -253,7 +255,21 @@ auto FlewIdApp::configure_gui( ) -> void
         );
         ImGui::SliderFloat( "Damping", &step_params_.damping, 0.0F, 500.0F );
         ImGui::SliderFloat( "Viscosity", &step_params_.viscosity, 0.0F, 500.0F );
+        if ( ImGui::Checkbox( "Buffer zones", &step_params_.buffers ) )
+        {
+            camera_frames_updated_.clear( );
+        }
+        ImGui::SetItemTooltip(
+            "Reset particles to the undisturbed flow in zones at both ends of the tunnel\n"
+            "(like the settling chamber and diffuser of a real wind tunnel)."
+        );
+        if ( ImGui::SliderFloat( "Buffer length", &step_params_.buffer_width, 0.05F, 1.0F ) )
+        {
+            camera_frames_updated_.clear( );
+        }
+        ImGui::BeginDisabled( step_params_.buffers );
         ImGui::Checkbox( "Respawn at tunnel ends", &step_params_.respawn );
+        ImGui::EndDisabled( );
         ImGui::SetItemTooltip(
             "Replace particles leaving either end of the tunnel with new particles of\n"
             "the incoming flow instead of carrying their velocity around to the other end."
@@ -375,7 +391,20 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
     auto const& options = app_options( );
 
     scenario_          = options.scenario;
-    scenario_settings_ = options.scenario_settings;
+    scenario_settings_ = default_scenario_settings( scenario_ );
+    if ( options.angle_degrees )
+    {
+        scenario_settings_.angle_degrees = options.angle_degrees.value( );
+    }
+    if ( options.flow_speed )
+    {
+        scenario_settings_.flow_speed = options.flow_speed.value( );
+    }
+    if ( options.throat_fraction )
+    {
+        scenario_settings_.throat_fraction = options.throat_fraction.value( );
+    }
+    step_params_.buffers = !options.no_buffers;
     if ( options.particle_count > 0U )
     {
         particle_count_ = options.particle_count;
@@ -921,6 +950,8 @@ auto FlewIdApp::update_camera_uniforms( vlk::objs::FrameInfo const& frame )
         .reference_temperature = thermal_speed_ * thermal_speed_,
         .particle_mode         = particle_mode_,
         .particle_brightness   = particle_brightness_,
+        .buffer_width
+        = ( step_params_.buffers && step_params_.flow_speed > 0.0F ) ? step_params_.buffer_width : 0.0F,
     };
 
     LTB_CHECK_VALID( frame.frame_index < camera_ubo_.layout( ).ranges.size( ) );

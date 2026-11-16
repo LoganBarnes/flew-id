@@ -76,6 +76,12 @@ auto venturi_walls(
     float32       throat_height
 ) -> std::vector< Polygon >;
 
+/// \brief The settings a scenario works best with. The venturi scenarios use a slower flow
+///        and a wider throat than the defaults so the flow speeds up through the throat
+///        without choking (the fluid is compressible).
+[[nodiscard( "Pure function" )]]
+auto default_scenario_settings( Scenario scenario ) -> ScenarioSettings;
+
 [[nodiscard( "Pure function" )]]
 auto make_scenario( Scenario scenario, Tunnel const& tunnel, ScenarioSettings const& settings )
     -> ScenarioSetup;

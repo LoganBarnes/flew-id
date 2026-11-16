@@ -30,6 +30,18 @@ auto scenario_tunnel( Scenario const scenario ) -> Tunnel
     return Tunnel{ };
 }
 
+auto default_scenario_settings( Scenario const scenario ) -> ScenarioSettings
+{
+    auto settings = ScenarioSettings{ };
+
+    if ( Scenario::Venturi == scenario || Scenario::LongVenturi == scenario )
+    {
+        settings.flow_speed      = 0.2F;
+        settings.throat_fraction = 0.5F;
+    }
+    return settings;
+}
+
 auto venturi_walls(
     Tunnel const& tunnel,
     float32 const start_x,

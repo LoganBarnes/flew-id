@@ -100,5 +100,18 @@ void main()
     float pixel   = max(fwidth(distance), 1.0e-6F);
     float outside = smoothstep(-0.5F * pixel, 0.5F * pixel, distance);
 
-    out_color = vec4(mix(solid_color, field_color(world_position), outside), 1.0F);
+    vec3 color = field_color(world_position);
+
+    // Mark the buffer zones (where the flow is artificially reset) with a
+    // slight tint and a line where they meet the rest of the tunnel.
+    float end_distance = min(world_position.x, display.tunnel_size.x - world_position.x);
+    if (end_distance < display.buffer_width)
+    {
+        float line_width = 1.5F * fwidth(world_position.x);
+        float on_line    = step(display.buffer_width - line_width, end_distance);
+
+        color = mix(color, vec3(0.5F), 0.12F + (0.4F * on_line));
+    }
+
+    out_color = vec4(mix(solid_color, color, outside), 1.0F);
 }

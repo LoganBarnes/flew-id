@@ -53,8 +53,12 @@ struct StepConstants
     uint32     field_scale = 1U;
     float32    field_blend = 0.0F;
 
-    uint32 respawn = 0U;
+    uint32 boundary_flags = 0U;
 };
+
+/// \brief Matches RESPAWN_FLAG and BUFFERS_FLAG in `particle.glsl`.
+constexpr auto respawn_flag = 1U;
+constexpr auto buffers_flag = 2U;
 
 constexpr auto particles_a_range = 0UZ;
 constexpr auto particles_b_range = 1UZ;
@@ -393,7 +397,7 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
 
         .flow_speed    = params.flow_speed,
         .thermal_speed = params.thermal_speed,
-        .inflow_width  = params.inflow_width,
+        .inflow_width  = params.buffers ? params.buffer_width : params.inflow_width,
         .inflow_rate   = params.inflow_rate,
 
         .wall_friction    = params.wall_friction,
@@ -403,7 +407,8 @@ auto ParticleSystem::record_step( vk::CommandBuffer const& command_buffer, StepP
         .field_scale = settings_.field_cell_scale,
         .field_blend = params.field_blend,
 
-        .respawn = params.respawn ? 1U : 0U,
+        .boundary_flags = ( ( params.respawn || params.buffers ) ? respawn_flag : 0U )
+                        | ( params.buffers ? buffers_flag : 0U ),
     };
 
     // Binds a pipeline with the current constants and runs it over `item_count` items.

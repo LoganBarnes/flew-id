@@ -3,6 +3,9 @@
 // ///////////////////////////////////////////////////////////////////////////////////////
 #include "ltb/flew/scenarios.hpp"
 
+// project
+#include "ltb/flew/particle_system.hpp"
+
 // external
 #include <gtest/gtest.h>
 
@@ -155,10 +158,13 @@ TEST_F( ScenarioTests, FlowScenariosHaveSolidsThatLeaveRoomForTheFluid )
         EXPECT_GT( fraction, 0.001F ) << name;
         EXPECT_LT( fraction, 0.5F ) << name;
 
-        // The inflow region on the left side of the tunnel must be clear of solids.
+        // The buffer zones at both ends of the tunnel must be clear of solids.
+        auto const buffer_width = StepParams{ }.buffer_width;
         for ( auto y = 0.05F; y < tunnel.size.y; y += 0.1F )
         {
-            EXPECT_GT( signed_distance( setup.solids, { 0.1F, y } ), 0.1F ) << name;
+            EXPECT_GT( signed_distance( setup.solids, { buffer_width, y } ), 0.05F ) << name;
+            EXPECT_GT( signed_distance( setup.solids, { tunnel.size.x - buffer_width, y } ), 0.05F )
+                << name;
         }
     }
 }
@@ -228,6 +234,33 @@ TEST_F( ScenarioTests, VenturiNarrowsTheMiddleOfTheTunnelToAThird )
     // Fully open before and after the constriction.
     EXPECT_FLOAT_EQ( open_fraction( setup.solids, tunnel, tunnel.size.x * 0.2F ), 1.0F );
     EXPECT_FLOAT_EQ( open_fraction( setup.solids, tunnel, tunnel.size.x * 0.8F ), 1.0F );
+}
+
+TEST( ScenarioDefaultTests, VenturiScenariosUseASlowerFlowAndWiderThroat )
+{
+    auto const general = default_scenario_settings( Scenario::Airfoil );
+
+    for ( auto const scenario : { Scenario::Venturi, Scenario::LongVenturi } )
+    {
+        auto const settings = default_scenario_settings( scenario );
+
+        EXPECT_FLOAT_EQ( settings.flow_speed, 0.2F );
+        EXPECT_FLOAT_EQ( settings.throat_fraction, 0.5F );
+        EXPECT_LT( settings.flow_speed, general.flow_speed );
+        EXPECT_GT( settings.throat_fraction, general.throat_fraction );
+    }
+}
+
+TEST( ScenarioDefaultTests, OtherScenariosUseTheGeneralDefaults )
+{
+    for ( auto const scenario : { Scenario::Box, Scenario::Cylinder, Scenario::Airfoil, Scenario::Plate } )
+    {
+        auto const settings = default_scenario_settings( scenario );
+
+        EXPECT_FLOAT_EQ( settings.flow_speed, ScenarioSettings{ }.flow_speed );
+        EXPECT_FLOAT_EQ( settings.angle_degrees, ScenarioSettings{ }.angle_degrees );
+        EXPECT_FLOAT_EQ( settings.throat_fraction, ScenarioSettings{ }.throat_fraction );
+    }
 }
 
 TEST_F( ScenarioTests, VenturiThroatIsAdjustable )

@@ -37,7 +37,8 @@ layout(push_constant, std430) uniform StepConstants
     float flow_speed;
     // Root mean square speed of the random motion given to entering particles.
     float thermal_speed;
-    // Particles with x < inflow_width are randomly reset to the incoming flow conditions.
+    // The length of the region(s) at the end(s) of the tunnel where particles are randomly
+    // reset to the incoming flow conditions, and how often (1/s) each particle is reset.
     float inflow_width;
     float inflow_rate;
 
@@ -53,11 +54,17 @@ layout(push_constant, std430) uniform StepConstants
     // How much of each new field measurement is blended into the running average [0, 1].
     float field_blend;
 
-    // When not zero, a particle leaving either end of the tunnel is replaced by a new
+    // RESPAWN_FLAG: a particle leaving either end of the tunnel is replaced by a new
     // particle of the undisturbed incoming flow (as if the tunnel continued far beyond
     // both ends) instead of keeping its velocity when it re-enters at the other end.
-    uint respawn;
+    //
+    // BUFFERS_FLAG: particles are reset in buffer zones at both ends of the tunnel
+    // (more often the closer they are to the end) instead of only near the inlet.
+    uint boundary_flags;
 } sim;
+
+const uint RESPAWN_FLAG = 1U;
+const uint BUFFERS_FLAG = 2U;
 
 // The number of cells summed by a single invocation of the prefix sum passes.
 const uint SCAN_BLOCK_SIZE = 256U;

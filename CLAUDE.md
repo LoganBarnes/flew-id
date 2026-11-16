@@ -80,8 +80,12 @@ ctest --test-dir cmake-build-default -C Debug
   Adding a binding means updating `initialize_pipeline` in `particle_system.cpp`.
 - The default time step and contact stiffness are tied together (`default_step_params`).
   Softer or larger steps let particles pass through each other.
-- The venturi scenarios choke at the default flow speed (0.5) and throat (1/3). Slower flow
-  and a wider throat (`--flow 0.2 --throat 0.5`) give subsonic, Bernoulli-like behavior.
+- Scenario defaults come from `default_scenario_settings`. The venturi scenarios use flow 0.2
+  and throat 0.5 because they choke at the general defaults (flow 0.5, throat 1/3).
+- Buffer zones (`StepParams::buffers`, on by default) reset velocities at both ends of the
+  tunnel. Moving particles sideways in the buffers to even out density was tried (a drift
+  down the gradient of the time-averaged density) and removed: the averaged density lags, the
+  correction overshoots, and the simulation blows up.
 - The model is a gas of soft disks, so it is compressible and noisy. Only the averaged
   fields behave like a fluid; keep the flow speed below the thermal speed.
 
@@ -106,4 +110,6 @@ designated initializers, fixed-width aliases (`float32`, `uint32`), and the file
 - No scrubbable playback format yet (video only), no Coanda scenario, no 3D, no web port.
 - The closed `Box` scenario slowly gains energy (about 7% over 80k steps); there is no
   thermostat outside of the inflow region.
+- Density is not relaxed at the tunnel ends (only velocity), so uneven density wraps around.
+  A real fix needs open ends that add and remove particles.
 - Field cells partly covered by a solid read as low density/pressure (a thin false rim).

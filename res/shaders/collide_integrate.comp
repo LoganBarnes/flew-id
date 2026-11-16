@@ -87,13 +87,33 @@ void main()
         // Randomly reset particles in the inflow region to the incoming flow
         // conditions. This drives the flow, removes the wake of the solids before
         // it re-enters the tunnel, and keeps the temperature of the fluid constant.
-        bool reset = (position.x < sim.inflow_width)
-                  && (random_float(seed) < (sim.inflow_rate * sim.delta_time));
+        float reset_rate = 0.0F;
+
+        if ((sim.boundary_flags & BUFFERS_FLAG) != 0U)
+        {
+            // Buffer zones at both ends. The outlet buffer absorbs wakes and pressure
+            // waves before they reach the end of the tunnel and the inlet buffer
+            // delivers a uniform flow. Resets become gradually more frequent towards
+            // the ends so the start of a buffer doesn't act like a wall.
+            float end_distance = min(position.x, sim.tunnel_size.x - position.x);
+
+            if (end_distance < sim.inflow_width)
+            {
+                float strength = 1.0F - (end_distance / sim.inflow_width);
+                reset_rate = sim.inflow_rate * strength * strength;
+            }
+        }
+        else if (position.x < sim.inflow_width)
+        {
+            reset_rate = sim.inflow_rate;
+        }
+
+        bool reset = (random_float(seed) < (reset_rate * sim.delta_time));
 
         // When respawning, nothing that happened inside the tunnel is carried around
         // to the other end: every particle crossing an end becomes a new particle of
         // the undisturbed flow.
-        if (reset || (left_tunnel && sim.respawn != 0U))
+        if (reset || (left_tunnel && (sim.boundary_flags & RESPAWN_FLAG) != 0U))
         {
             velocity = vec2(sim.flow_speed, 0.0F)
                      + (random_normal(seed) * sim.thermal_speed * 0.70710678F);

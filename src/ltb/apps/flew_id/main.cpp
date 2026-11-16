@@ -21,6 +21,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
           cxxopts::value< ltb::float32 >( ) )
         ( "field", "Background: None, Speed, Pressure, Density, Vorticity, or Temperature",
           cxxopts::value< std::string >( ) )
+        ( "no-buffers", "Reset particles in a thin inlet region instead of buffer zones at both ends" )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "hide-particles", "Only draw the background" )
         ( "s,steps", "Exit after this many simulation steps", cxxopts::value< ltb::uint64 >( ) )
@@ -63,20 +64,21 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         }
         if ( args.count( "angle" ) > 0UZ )
         {
-            app_options.scenario_settings.angle_degrees = args[ "angle" ].as< ltb::float32 >( );
+            app_options.angle_degrees = args[ "angle" ].as< ltb::float32 >( );
         }
         if ( args.count( "throat" ) > 0UZ )
         {
-            app_options.scenario_settings.throat_fraction = args[ "throat" ].as< ltb::float32 >( );
+            app_options.throat_fraction = args[ "throat" ].as< ltb::float32 >( );
         }
         if ( args.count( "flow" ) > 0UZ )
         {
-            app_options.scenario_settings.flow_speed = args[ "flow" ].as< ltb::float32 >( );
+            app_options.flow_speed = args[ "flow" ].as< ltb::float32 >( );
         }
         if ( args.count( "field" ) > 0UZ )
         {
             app_options.field = args[ "field" ].as< std::string >( );
         }
+        app_options.no_buffers     = ( args.count( "no-buffers" ) > 0UZ );
         app_options.respawn        = ( args.count( "respawn" ) > 0UZ );
         app_options.hide_particles = ( args.count( "hide-particles" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )

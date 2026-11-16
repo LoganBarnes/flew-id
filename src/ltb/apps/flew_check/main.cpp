@@ -27,7 +27,7 @@ struct CheckOptions
 {
     ParticleSystemSettings system            = { };
     Scenario               scenario          = Scenario::Box;
-    ScenarioSettings       scenario_settings = { };
+    bool                   no_buffers        = false;
     uint64                 steps             = 5'000UZ;
     bool                   respawn           = false;
 };
@@ -44,7 +44,11 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
         / options.system.tunnel.size.y
     );
 
-    auto setup = make_scenario( options.scenario, options.system.tunnel, options.scenario_settings );
+    auto setup = make_scenario(
+        options.scenario,
+        options.system.tunnel,
+        default_scenario_settings( options.scenario )
+    );
 
     options.system.solids             = std::move( setup.solids );
     options.system.fill.mean_velocity = { setup.flow_speed, 0.0F };
@@ -68,6 +72,7 @@ auto run_check( CheckOptions options ) -> utils::Result< void >
     params.flow_speed    = setup.flow_speed;
     params.thermal_speed = options.system.fill.thermal_speed;
     params.respawn       = options.respawn;
+    params.buffers       = !options.no_buffers;
 
     LTB_CHECK( auto const initial_particles, particles.read_particles( command_pool, queue ) );
     auto const initial_stats
@@ -138,6 +143,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
     options.add_options( )
         ( "p,particles", "Number of particles", cxxopts::value< ltb::uint32 >( ) )
         ( "scenario", "Box, Cylinder, Airfoil, Plate, Venturi, or LongVenturi", cxxopts::value< std::string >( ) )
+        ( "no-buffers", "Reset particles in a thin inlet region instead of buffer zones at both ends" )
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "s,steps", "Number of simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "h,help", "Print usage" );
@@ -168,7 +174,8 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
             }
             check_options.scenario = scenario.value( );
         }
-        check_options.respawn = ( args.count( "respawn" ) > 0UZ );
+        check_options.no_buffers = ( args.count( "no-buffers" ) > 0UZ );
+        check_options.respawn    = ( args.count( "respawn" ) > 0UZ );
         if ( args.count( "steps" ) > 0UZ )
         {
             check_options.steps = args[ "steps" ].as< ltb::uint64 >( );

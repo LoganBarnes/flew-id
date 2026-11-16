@@ -230,6 +230,7 @@ auto FlewIdApp::configure_gui( ) -> void
              ) )
         {
             model_             = static_cast< FluidModel >( model_index );
+            show_particles_    = ( FluidModel::Gas == model_ );
             restart_requested_ = true;
         }
         ImGui::SetItemTooltip(
@@ -461,7 +462,8 @@ auto FlewIdApp::initialize_simulation( ) -> utils::Result< FlewIdApp* >
             field_mode_ = static_cast< int32 >( mode );
         }
     }
-    show_particles_      = !options.hide_particles;
+    // SPH particles are packed so tightly they only draw a moire pattern over the fields.
+    show_particles_      = !options.hide_particles && ( FluidModel::Sph != model_ );
     step_params_.respawn = options.respawn;
     if ( options.steps_per_update > 0U )
     {

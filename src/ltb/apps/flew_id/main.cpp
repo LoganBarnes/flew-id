@@ -27,7 +27,7 @@ auto main( ltb::int32 const argc, char const* argv[] ) -> int
         ( "respawn", "Replace particles leaving the ends of the tunnel with new incoming particles" )
         ( "field-scale", "Collision cells (per direction) averaged into one flow field cell",
           cxxopts::value< ltb::uint32 >( ) )
-        ( "hide-particles", "Only draw the background" )
+        ( "hide-particles", "Only draw the background (the default for SPH)" )
         ( "s,steps", "Exit after this many simulation steps", cxxopts::value< ltb::uint64 >( ) )
         ( "video", "Record every frame to this video file (requires ffmpeg)",
           cxxopts::value< std::string >( ) )

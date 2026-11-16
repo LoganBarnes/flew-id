@@ -25,9 +25,6 @@ Current cost at 200k particles (RTX 4050, GPU time per step): Gas about 0.09 ms,
 
 ## Display
 
-- [ ] **SPH particle overlay.** At 200k particles the tightly packed SPH particles draw as
-      a uniform grey moiré that shows nothing about the flow. Consider hiding them or
-      coloring them by speed by default in SPH mode, or drawing only a subset as tracers.
 - [ ] **Pressure reference.** The tunnel-wide pressure drop (from drag and the buffers) tints
       everything downstream blue, which competes with the pressure around the solid.
 
@@ -45,7 +42,9 @@ Current cost at 200k particles (RTX 4050, GPU time per step): Gas about 0.09 ms,
 - [ ] **Lift and drag.** Integrate pressure and viscous forces over the solids, and plot
       lift and drag coefficients against angle of attack. This is the biggest gain for
       building intuition about flight.
-- [ ] **Streamlines, dye, or tracer particles.**
+- [ ] **Streamlines, dye, or tracer particles.** Particles are hidden by default in SPH
+      (packed tightly they only draw a moiré pattern) and are re-sorted every step, so tracers
+      need their own buffer advected through the velocity field.
 - [ ] **Interactive solids.** Drag the airfoil and change its angle live.
 - [ ] **Coanda scenario.**
 - [ ] **Scrubbable playback.** Record the coarse field grid (small) instead of video, so it
